@@ -15,22 +15,52 @@ local json = require("json")
 local mod = RegisterMod("Stat Utils", 1)
 local _mcmModule = nil
 local _mcmSetupDone = false
+local _normalizeSettings
 
 ---@class StatUtils
-StatUtils = {}
+local _existingStatUtils = rawget(_G, "StatUtils")
+if type(_existingStatUtils) == "table" then
+    StatUtils = _existingStatUtils
+else
+    StatUtils = {}
+end
+
 StatUtils.mod = mod
 StatUtils.VERSION = "1.0.0"
-StatUtils.DEBUG = false
+StatUtils.DEBUG = StatUtils.DEBUG == true
 StatUtils.DEFAULT_SETTINGS = {
     displayEnabled = true,
     displayOffsetX = 0,
-    displayOffsetY = 0
+    displayOffsetY = 0,
+    trackVanillaDisplay = true,
+    debugEnabled = false
 }
-StatUtils.settings = {
-    displayEnabled = true,
-    displayOffsetX = 0,
-    displayOffsetY = 0
+if type(StatUtils.settings) ~= "table" then
+    StatUtils.settings = {
+        displayEnabled = true,
+        displayOffsetX = 0,
+        displayOffsetY = 0,
+        trackVanillaDisplay = true,
+        debugEnabled = false
+    }
+end
+if StatUtils.DEBUG then
+    Isaac.DebugString("[StatUtils][DEBUG] [Core] Global StatUtils table ref = " .. tostring(StatUtils))
+end
+
+local game = Game()
+local RUNTIME_TEXT_FADE_DELAY = 120
+local RUNTIME_TEXT_FADE_STEP = 0.02
+local RUNTIME_TEXT_SCALE = 1
+local RUNTIME_TEXT_LEFT_PADDING = 18
+local RUNTIME_TEXT_BOTTOM_PADDING = 18
+local RuntimeOverlay = {
+    font = Font(),
+    frameOfLastMsg = 0,
+    messages = {},
+    maxMessages = 10
 }
+RuntimeOverlay.font:Load("font/pftempestasevencondensed.fnt")
 
 ---------------------------------------------
 -- Logging
@@ -54,12 +84,180 @@ function StatUtils.printError(msg)
     Isaac.DebugString(text)
 end
 
+function StatUtils:IsDebugModeEnabled()
+    if type(self.settings) ~= "table" then
+        self.settings = _normalizeSettings(nil)
+    end
+    return self.settings.debugEnabled == true
+end
+
+function StatUtils:ClearRuntimeNotice()
+    RuntimeOverlay.frameOfLastMsg = 0
+    RuntimeOverlay.messages = {}
+end
+
+function StatUtils:ShowRuntimeNotice(message, kind)
+    if not self:IsDebugModeEnabled() then
+        return
+    end
+    if type(message) ~= "string" or message == "" then
+        return
+    end
+
+    RuntimeOverlay.frameOfLastMsg = Isaac.GetFrameCount()
+    table.insert(RuntimeOverlay.messages, {
+        text = message,
+        kind = kind or "info"
+    })
+    if #RuntimeOverlay.messages > RuntimeOverlay.maxMessages then
+        table.remove(RuntimeOverlay.messages, 1)
+    end
+end
+
+function StatUtils:RenderRuntimeNotice()
+    if not self:IsDebugModeEnabled() then
+        self:ClearRuntimeNotice()
+        return
+    end
+
+    if #RuntimeOverlay.messages == 0 or RuntimeOverlay.frameOfLastMsg == 0 then
+        return
+    end
+
+    if AwaitingTextInput then
+        return
+    end
+
+    if game:IsPaused() then
+        return
+    end
+
+    if ModConfigMenu ~= nil and ModConfigMenu.IsVisible then
+        return
+    end
+
+    local elapsed = Isaac.GetFrameCount() - RuntimeOverlay.frameOfLastMsg
+    local alpha = 1
+    if elapsed > RUNTIME_TEXT_FADE_DELAY then
+        alpha = 1 - (RUNTIME_TEXT_FADE_STEP * (elapsed - RUNTIME_TEXT_FADE_DELAY))
+    end
+    if alpha <= 0 then
+        self:ClearRuntimeNotice()
+        return
+    end
+
+    local lineHeight = RuntimeOverlay.font:GetLineHeight() * RUNTIME_TEXT_SCALE
+    local x = RUNTIME_TEXT_LEFT_PADDING
+    local startY = Isaac.GetScreenHeight() - RUNTIME_TEXT_BOTTOM_PADDING - ((#RuntimeOverlay.messages - 1) * lineHeight)
+
+    for i, entry in ipairs(RuntimeOverlay.messages) do
+        local color = KColor(1, 1, 1, alpha)
+        if entry.kind == "success" then
+            color = KColor(0, 1, 0, alpha)
+        elseif entry.kind == "error" then
+            color = KColor(1, 0, 0, alpha)
+        end
+
+        RuntimeOverlay.font:DrawStringScaledUTF8(
+            entry.text,
+            x,
+            startY + ((i - 1) * lineHeight),
+            RUNTIME_TEXT_SCALE,
+            RUNTIME_TEXT_SCALE,
+            color,
+            0,
+            true
+        )
+    end
+end
+
 ---------------------------------------------
 -- Simple Run-Based Save System
 ---------------------------------------------
 StatUtils._runData = { players = {} }
+local RUNTIME_QUEUE_PREFIX = "__SUQ__"
+local RUNTIME_POLL_INTERVAL = 3
+local _lastRuntimePollFrame = -RUNTIME_POLL_INTERVAL
 
-local function _normalizeSettings(rawSettings)
+local function _startsWith(text, prefix)
+    return type(text) == "string"
+        and type(prefix) == "string"
+        and string.sub(text, 1, #prefix) == prefix
+end
+
+local function _getRawModData(modRef)
+    if not modRef or not modRef:HasData() then
+        return ""
+    end
+    local ok, raw = pcall(function()
+        return modRef:LoadData()
+    end)
+    if ok and type(raw) == "string" then
+        return raw
+    end
+    return ""
+end
+
+local function _extractPersistentData(raw)
+    if type(raw) ~= "string" or raw == "" then
+        return "{}"
+    end
+
+    local lines = {}
+    for line in string.gmatch(raw, "[^\r\n]+") do
+        if not _startsWith(line, RUNTIME_QUEUE_PREFIX) then
+            table.insert(lines, line)
+        end
+    end
+
+    local cleaned = table.concat(lines, "\n")
+    if cleaned == "" then
+        return "{}"
+    end
+    return cleaned
+end
+
+local function _parseRuntimeQueue(raw)
+    local queue = {}
+    if type(raw) ~= "string" or raw == "" then
+        return queue
+    end
+
+    for line in string.gmatch(raw, "[^\r\n]+") do
+        if _startsWith(line, RUNTIME_QUEUE_PREFIX) then
+            local payload = string.sub(line, #RUNTIME_QUEUE_PREFIX + 1)
+            local sep = string.find(payload, "|", 1, true)
+            if sep and sep > 1 then
+                local kind = string.sub(payload, 1, sep - 1)
+                local data = string.sub(payload, sep + 1)
+                if kind == "CMD" and data ~= "" then
+                    table.insert(queue, { type = "command", data = data })
+                elseif kind == "MSG" and data ~= "" then
+                    table.insert(queue, { type = "msg", data = data })
+                end
+            end
+        end
+    end
+
+    return queue
+end
+
+local function _consumeRuntimeQueue(modRef)
+    local raw = _getRawModData(modRef)
+    local queue = _parseRuntimeQueue(raw)
+    if #queue == 0 then
+        return queue
+    end
+
+    local persistent = _extractPersistentData(raw)
+    pcall(function()
+        modRef:SaveData(persistent)
+    end)
+
+    return queue
+end
+
+_normalizeSettings = function(rawSettings)
     local function clampNumber(value, minValue, maxValue)
         if value < minValue then
             return minValue
@@ -115,12 +313,16 @@ local function _normalizeSettings(rawSettings)
     local normalized = {
         displayEnabled = true,
         displayOffsetX = 0,
-        displayOffsetY = 0
+        displayOffsetY = 0,
+        trackVanillaDisplay = true,
+        debugEnabled = false
     }
     if type(rawSettings) == "table" then
         normalized.displayEnabled = toBoolean(rawSettings.displayEnabled, true)
         normalized.displayOffsetX = toInteger(rawSettings.displayOffsetX, 0, -200, 200)
         normalized.displayOffsetY = toInteger(rawSettings.displayOffsetY, 0, -200, 200)
+        normalized.trackVanillaDisplay = toBoolean(rawSettings.trackVanillaDisplay, true)
+        normalized.debugEnabled = toBoolean(rawSettings.debugEnabled, false)
     end
     return normalized
 end
@@ -197,6 +399,117 @@ function StatUtils:GetDisplayOffsets()
     return self:GetDisplayOffsetX(), self:GetDisplayOffsetY()
 end
 
+function StatUtils:IsVanillaDisplayTrackingEnabled()
+    if type(self.settings) ~= "table" then
+        self.settings = _normalizeSettings(nil)
+    end
+    return self.settings.trackVanillaDisplay ~= false
+end
+
+function StatUtils:SetDebugModeEnabled(enabled)
+    local function toBoolean(value, defaultValue)
+        if type(value) == "boolean" then
+            return value
+        end
+        if type(value) == "number" then
+            return value ~= 0
+        end
+        if type(value) == "string" then
+            local v = string.lower(value)
+            if v == "false" or v == "0" or v == "off" or v == "no" then
+                return false
+            end
+            if v == "true" or v == "1" or v == "on" or v == "yes" then
+                return true
+            end
+        end
+        return defaultValue
+    end
+
+    if type(self.settings) ~= "table" then
+        self.settings = _normalizeSettings(nil)
+    end
+
+    local target = toBoolean(enabled, false)
+    local changed = (self.settings.debugEnabled ~= target) or (self.DEBUG ~= target)
+    self.settings.debugEnabled = target
+    self.DEBUG = target
+
+    if not target then
+        self:ClearRuntimeNotice()
+    else
+        self:ShowRuntimeNotice("Debug mode ON", "success")
+    end
+
+    if changed then
+        StatUtils.print("Debug mode: " .. (target and "ON" or "OFF"))
+        self:SaveRunData()
+    end
+end
+
+function StatUtils:SetVanillaDisplayTrackingEnabled(enabled)
+    local function toBoolean(value, defaultValue)
+        if type(value) == "boolean" then
+            return value
+        end
+        if type(value) == "number" then
+            return value ~= 0
+        end
+        if type(value) == "string" then
+            local v = string.lower(value)
+            if v == "false" or v == "0" or v == "off" or v == "no" then
+                return false
+            end
+            if v == "true" or v == "1" or v == "on" or v == "yes" then
+                return true
+            end
+        end
+        return defaultValue
+    end
+
+    if type(self.settings) ~= "table" then
+        self.settings = _normalizeSettings(nil)
+    end
+
+    local target = toBoolean(enabled, true)
+    if self.settings.trackVanillaDisplay == target then
+        return
+    end
+
+    self.settings.trackVanillaDisplay = target
+
+    if self.stats
+        and self.stats.unifiedMultipliers
+        and type(self.stats.unifiedMultipliers.RecalculateStatMultiplier) == "function" then
+        local unified = self.stats.unifiedMultipliers
+        local prevEvaluatingState = unified._isEvaluatingCache
+        unified._isEvaluatingCache = true
+        local numPlayers = Game():GetNumPlayers()
+        for i = 0, numPlayers - 1 do
+            local player = Isaac.GetPlayer(i)
+            if player then
+                local playerID = self:GetPlayerInstanceKey(player)
+                local perPlayer = unified[playerID]
+                if perPlayer and perPlayer.statMultipliers then
+                    for statType, _ in pairs(perPlayer.statMultipliers) do
+                        unified:RecalculateStatMultiplier(player, statType)
+                    end
+                end
+            end
+        end
+        unified._isEvaluatingCache = prevEvaluatingState
+    end
+
+    if self.stats
+        and self.stats.multiplierDisplay
+        and type(self.stats.multiplierDisplay.RefreshAllFromUnified) == "function" then
+        self.stats.multiplierDisplay:RefreshAllFromUnified()
+    end
+
+    StatUtils.print("Vanilla display tracking: " .. (target and "ON" or "OFF"))
+    self:SaveRunData()
+end
+
 function StatUtils:SetDisplayOffsets(offsetX, offsetY)
     if type(self.settings) ~= "table" then
         self.settings = _normalizeSettings(nil)
@@ -205,7 +518,8 @@ function StatUtils:SetDisplayOffsets(offsetX, offsetY)
     local normalized = _normalizeSettings({
         displayEnabled = self.settings.displayEnabled,
         displayOffsetX = offsetX,
-        displayOffsetY = offsetY
+        displayOffsetY = offsetY,
+        trackVanillaDisplay = self.settings.trackVanillaDisplay
     })
 
     local changed = false
@@ -310,11 +624,13 @@ function StatUtils:LoadRunData()
     if not self.mod:HasData() then
         StatUtils.printDebug("No saved data found")
         self.settings = _normalizeSettings(self.settings)
+        self.DEBUG = self.settings.debugEnabled == true
         return
     end
-    local raw = self.mod:LoadData()
+    local raw = _getRawModData(self.mod)
+    local persistent = _extractPersistentData(raw)
     local ok, data = pcall(function()
-        return json.decode(raw)
+        return json.decode(persistent)
     end)
     if ok and data and type(data) == "table" then
         local loadedRunData = data
@@ -326,11 +642,13 @@ function StatUtils:LoadRunData()
             self._runData.players = {}
         end
         self.settings = _normalizeSettings(data.settings)
+        self.DEBUG = self.settings.debugEnabled == true
         StatUtils.printDebug("Run data loaded successfully")
     else
         StatUtils.printError("Failed to load run data: " .. tostring(data))
         self._runData = { players = {} }
         self.settings = _normalizeSettings(nil)
+        self.DEBUG = self.settings.debugEnabled == true
     end
 end
 
@@ -340,13 +658,51 @@ function StatUtils:ClearRunData()
     StatUtils.printDebug("Run data cleared (settings preserved)")
 end
 
+function StatUtils:PollRuntimeQueue()
+    local frame = Isaac.GetFrameCount()
+    if (frame - _lastRuntimePollFrame) < RUNTIME_POLL_INTERVAL then
+        return
+    end
+    _lastRuntimePollFrame = frame
+
+    local queue = _consumeRuntimeQueue(self.mod)
+    if type(queue) ~= "table" or #queue == 0 then
+        return
+    end
+
+    for _, entry in ipairs(queue) do
+        if type(entry) == "table" and type(entry.data) == "string" and entry.data ~= "" then
+            if entry.type == "msg" then
+                StatUtils.print("[runtime] " .. entry.data)
+                local kind = "info"
+                local lowered = string.lower(entry.data)
+                if _startsWith(lowered, "reloaded") or _startsWith(lowered, "reload complete") then
+                    kind = "success"
+                elseif _startsWith(lowered, "error") then
+                    kind = "error"
+                end
+                self:ShowRuntimeNotice(entry.data, kind)
+            elseif entry.type == "command" then
+                StatUtils.print("[runtime] Executing command: " .. entry.data)
+                self:ShowRuntimeNotice("Executing: " .. entry.data, "info")
+                Isaac.ExecuteCommand(entry.data)
+            end
+        end
+    end
+end
+
 ---------------------------------------------
 -- Console Command: Toggle Debug
 ---------------------------------------------
 mod:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, cmd, args)
     if cmd == "statutils_debug" then
-        StatUtils.DEBUG = not StatUtils.DEBUG
-        StatUtils.print("Debug mode: " .. (StatUtils.DEBUG and "ON" or "OFF"))
+        StatUtils:SetDebugModeEnabled(not StatUtils.DEBUG)
+    end
+end)
+
+mod:AddCallback(ModCallbacks.MC_POST_UPDATE, function()
+    if StatUtils and type(StatUtils.PollRuntimeQueue) == "function" then
+        StatUtils:PollRuntimeQueue()
     end
 end)
 
@@ -503,6 +859,9 @@ trySetupMCM()
 mod:AddCallback(ModCallbacks.MC_POST_RENDER, function()
     if not _mcmSetupDone then
         trySetupMCM()
+    end
+    if StatUtils and type(StatUtils.RenderRuntimeNotice) == "function" then
+        StatUtils:RenderRuntimeNotice()
     end
 end)
 mod:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()

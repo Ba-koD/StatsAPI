@@ -2,8 +2,7 @@
 -- Unified multiplier management, HUD display UI, and stat application functions
 -- Standalone version (no external dependencies except Isaac API)
 
-StatUtils.stats = {}
-local REPENTANCE_PLUS = rawget(_G, "REPENTANCE_PLUS")
+StatUtils.stats = StatUtils.stats or {}
 
 -- base stats
 StatUtils.stats.BASE_STATS = {
@@ -18,7 +17,7 @@ StatUtils.stats.BASE_STATS = {
 -------------------------------------------------------------------------------
 -- Unified Multiplier Management System
 -------------------------------------------------------------------------------
-StatUtils.stats.unifiedMultipliers = {}
+StatUtils.stats.unifiedMultipliers = StatUtils.stats.unifiedMultipliers or {}
 
 local function _playerScopedSourceKey(sourceKey)
     if sourceKey == nil then
@@ -30,6 +29,11 @@ end
 -- Initialize unified multiplier system for a player
 function StatUtils.stats.unifiedMultipliers:InitPlayer(player)
     if not player then return end
+
+    if not self._tableRefLogged then
+        self._tableRefLogged = true
+        StatUtils.printDebug(string.format("[Unified] table ref = %s", tostring(self)))
+    end
 
     local playerID = StatUtils:GetPlayerInstanceKey(player)
     if not self[playerID] then
@@ -74,6 +78,39 @@ local function _toEquivalentMultiplierFromAddition(player, statType, addition)
         return 1.0
     end
     return 1.0
+end
+
+local function _isVanillaDisplayTrackingEnabled()
+    if StatUtils and type(StatUtils.IsVanillaDisplayTrackingEnabled) == "function" then
+        return StatUtils:IsVanillaDisplayTrackingEnabled()
+    end
+    if StatUtils and type(StatUtils.settings) == "table" then
+        return StatUtils.settings.trackVanillaDisplay ~= false
+    end
+    return true
+end
+
+local function _getVanillaDisplayMultiplier(player, statType)
+    if not player or not _isVanillaDisplayTrackingEnabled() then
+        return 1.0
+    end
+    if not StatUtils or type(StatUtils.VanillaMultipliers) ~= "table" then
+        return 1.0
+    end
+
+    local vanillaMultiplier = 1.0
+    if statType == "Damage"
+        and type(StatUtils.VanillaMultipliers.GetPlayerDamageMultiplier) == "function" then
+        vanillaMultiplier = StatUtils.VanillaMultipliers:GetPlayerDamageMultiplier(player) or 1.0
+    elseif statType == "Tears"
+        and type(StatUtils.VanillaMultipliers.GetPlayerFireRateMultiplier) == "function" then
+        vanillaMultiplier = StatUtils.VanillaMultipliers:GetPlayerFireRateMultiplier(player) or 1.0
+    end
+
+    if type(vanillaMultiplier) ~= "number" or vanillaMultiplier <= 0 then
+        return 1.0
+    end
+    return vanillaMultiplier
 end
 
 -- Add or update multiplier for a specific item and stat
@@ -183,7 +220,8 @@ function StatUtils.stats.unifiedMultipliers:SetItemAddition(player, itemID, stat
         sequence = currentSequence,
         lastType = "addition",
         eqMult = eqMult,
-        isAdditiveMultiplier = false
+        isAdditiveMultiplier = false,
+        disabled = existing and existing.disabled == true or false
     }
 
     StatUtils.printDebug(string.format("  Stored Addition: Item %s %s = %+0.2f (Cumulative: %+0.2f, Sequence: %d)",
@@ -236,6 +274,7 @@ function StatUtils.stats.unifiedMultipliers:SetItemAdditiveMultiplier(player, it
     entry.sequence = currentSequence
     entry.lastType = "additive_multiplier"
     entry.eqMult = multiplierValue
+    entry.disabled = entry.disabled == true
     if entry.firstAddMultFrame == nil then
         entry.firstAddMultFrame = currentFrame
     end
@@ -256,30 +295,50 @@ function StatUtils.stats.unifiedMultipliers:SetItemMultiplierDisabled(player, it
 
     self:InitPlayer(player)
     local playerID = StatUtils:GetPlayerInstanceKey(player)
-    local perItem = self[playerID].itemMultipliers and self[playerID].itemMultipliers[itemID]
-    if not perItem or not perItem[statType] then
+    local target = (disabled == true)
+    local foundEntry = false
+    local changed = false
+
+    local function setDisabledOn(bucket)
+        if type(bucket) ~= "table" then
+            return
+        end
+        local perItem = bucket[itemID]
+        if type(perItem) ~= "table" then
+            return
+        end
+        local entry = perItem[statType]
+        if type(entry) ~= "table" then
+            return
+        end
+
+        foundEntry = true
+        if entry.disabled ~= target then
+            -- Keep the original sequence so "current" display keeps reflecting
+            -- the last real multiplier/addition update.
+            entry.disabled = target
+            changed = true
+        end
+    end
+
+    setDisabledOn(self[playerID].itemMultipliers)
+    setDisabledOn(self[playerID].itemAdditions)
+    setDisabledOn(self[playerID].itemAdditiveMultipliers)
+
+    if not foundEntry then
         return false
     end
 
-    local entry = perItem[statType]
-    local target = (disabled == true)
-    if entry.disabled == target then
-        return true
+    if changed then
+        self:RecalculateStatMultiplier(player, statType)
+        StatUtils.printDebug(string.format(
+            "Unified Multipliers: %s Item %s %s (disabled=%s)",
+            target and "Disabled" or "Enabled",
+            tostring(itemID),
+            statType,
+            tostring(target)
+        ))
     end
-
-    self[playerID].sequenceCounter = self[playerID].sequenceCounter + 1
-    entry.sequence = self[playerID].sequenceCounter
-    entry.disabled = target
-    entry.lastType = target and "remove_mult" or "multiplier"
-
-    self:RecalculateStatMultiplier(player, statType)
-    StatUtils.printDebug(string.format(
-        "Unified Multipliers: %s Item %s %s (disabled=%s)",
-        target and "Disabled" or "Enabled",
-        tostring(itemID),
-        statType,
-        tostring(target)
-    ))
 
     return true
 end
@@ -343,15 +402,35 @@ function StatUtils.stats.unifiedMultipliers:RemoveItemMultiplier(player, itemID,
     if not player or not itemID or not statType then return end
 
     local playerID = StatUtils:GetPlayerInstanceKey(player)
+    local removed = false
+
     if self[playerID] and self[playerID].itemMultipliers[itemID] then
         self[playerID].itemMultipliers[itemID][statType] = nil
-
         if not next(self[playerID].itemMultipliers[itemID]) then
             self[playerID].itemMultipliers[itemID] = nil
         end
+        removed = true
+    end
 
+    if self[playerID] and self[playerID].itemAdditions and self[playerID].itemAdditions[itemID] then
+        self[playerID].itemAdditions[itemID][statType] = nil
+        if not next(self[playerID].itemAdditions[itemID]) then
+            self[playerID].itemAdditions[itemID] = nil
+        end
+        removed = true
+    end
+
+    if self[playerID] and self[playerID].itemAdditiveMultipliers and self[playerID].itemAdditiveMultipliers[itemID] then
+        self[playerID].itemAdditiveMultipliers[itemID][statType] = nil
+        if not next(self[playerID].itemAdditiveMultipliers[itemID]) then
+            self[playerID].itemAdditiveMultipliers[itemID] = nil
+        end
+        removed = true
+    end
+
+    if removed then
         self:RecalculateStatMultiplier(player, statType)
-        StatUtils.printDebug(string.format("Unified Multipliers: Removed Item %s %s", tostring(itemID), statType))
+        StatUtils.printDebug(string.format("Unified Multipliers: Removed source %s %s (base/add/addMul)", tostring(itemID), statType))
     end
 end
 
@@ -394,11 +473,11 @@ function StatUtils.stats.unifiedMultipliers:RecalculateStatMultiplier(player, st
     local totalMultiplierApply = 1.0
     local totalAdditionApply = 0.0
     local totalMultiplierDisplay = 1.0
-    local lastItemCurrentVal = 1.0
-    local lastItemID = nil
-    local lastDescription = ""
-    local lastSequence = 0
-    local lastType = "multiplier"
+    local lastDisplayCurrentVal = 1.0
+    local lastDisplayItemID = nil
+    local lastDisplayDescription = ""
+    local lastDisplaySequence = 0
+    local lastDisplayType = "multiplier"
 
     StatUtils.printDebug(string.format("Recalculating %s for player %s:", statType, playerID))
 
@@ -418,24 +497,44 @@ function StatUtils.stats.unifiedMultipliers:RecalculateStatMultiplier(player, st
         end
     end
 
+    local function setDisplayCandidate(seq, value, valueType, itemID, description)
+        if type(seq) ~= "number" or seq <= lastDisplaySequence then
+            return
+        end
+        lastDisplaySequence = seq
+        lastDisplayCurrentVal = value
+        lastDisplayType = valueType
+        lastDisplayItemID = itemID
+        lastDisplayDescription = description or ""
+    end
+
     -- Aggregate per item
     for itemID, _ in pairs(touched) do
         local baseM, baseSeq, baseDesc, baseType = 1.0, 0, "", "multiplier"
+        local baseEnabled = false
         if self[playerID].itemMultipliers[itemID] and self[playerID].itemMultipliers[itemID][statType] then
             local baseEntry = self[playerID].itemMultipliers[itemID][statType]
-            if not (baseEntry.disabled == true) then
+            baseEnabled = not (baseEntry.disabled == true)
+            if baseEnabled then
                 baseM = baseEntry.value or 1.0
             end
             baseSeq = baseEntry.sequence or 0
             baseDesc = baseEntry.description or ""
             baseType = baseEntry.lastType or "multiplier"
+            if baseEnabled and baseType == "remove_mult" then
+                baseType = "multiplier"
+            end
         end
 
         local addCum, addSeq, addLastDelta, addDesc = 0, 0, 0, ""
+        local addEnabled = false
         if self[playerID].itemAdditions and self[playerID].itemAdditions[itemID] and self[playerID].itemAdditions[itemID][statType] then
             local ad = self[playerID].itemAdditions[itemID][statType]
-            addCum = ad.cumulative or 0
-            addLastDelta = ad.lastDelta or 0
+            addEnabled = not (ad.disabled == true)
+            if addEnabled then
+                addCum = ad.cumulative or 0
+                addLastDelta = ad.lastDelta or 0
+            end
             addSeq = ad.sequence or 0
             addDesc = ad.description or ""
         end
@@ -445,10 +544,14 @@ function StatUtils.stats.unifiedMultipliers:RecalculateStatMultiplier(player, st
         local addMulLastDelta = 0
         local addMulDesc = ""
         local hasAddMul = false
+        local addMulEnabled = false
         if self[playerID].itemAdditiveMultipliers and self[playerID].itemAdditiveMultipliers[itemID] and self[playerID].itemAdditiveMultipliers[itemID][statType] then
             local am = self[playerID].itemAdditiveMultipliers[itemID][statType]
-            addMulDelta = am.cumulative or 0
-            addMulLastDelta = am.lastDelta or 0
+            addMulEnabled = not (am.disabled == true)
+            if addMulEnabled then
+                addMulDelta = am.cumulative or 0
+                addMulLastDelta = am.lastDelta or 0
+            end
             addMulSeq = am.sequence or 0
             addMulDesc = am.description or ""
             hasAddMul = true
@@ -459,70 +562,97 @@ function StatUtils.stats.unifiedMultipliers:RecalculateStatMultiplier(player, st
         totalMultiplierApply = totalMultiplierApply * effectiveM
         totalAdditionApply = totalAdditionApply + addCum
 
-        local latestSeq = math.max(baseSeq, addSeq, addMulSeq)
+        if hasAddMul and addMulEnabled and addMulSeq > 0 then
+            local addMulType = (addMulLastDelta or 0) < 0 and "remove_mult" or "add_mult"
+            local addMulValue = addMulLastDelta
 
-        if latestSeq > lastSequence then
-            if addMulSeq == latestSeq and hasAddMul then
-                local am = self[playerID].itemAdditiveMultipliers[itemID][statType]
-                local isFirstMultiplier = math.abs((am.cumulative or 0) - (am.lastDelta or 0)) < 0.00001
-                if isFirstMultiplier then
-                    lastItemCurrentVal = 1.0 + (addMulLastDelta or 0)
-                    lastType = "multiplier"
-                    StatUtils.printDebug(string.format("  First additive mult for item %s %s: x%.2f", tostring(itemID), statType, lastItemCurrentVal))
-                else
-                    lastItemCurrentVal = addMulLastDelta
-                    lastType = "add_mult"
-                    StatUtils.printDebug(string.format("  Subsequent additive mult for item %s %s: %+.2f (cumulative=%.2f)",
-                        tostring(itemID), statType, lastItemCurrentVal, am.cumulative or 0))
-                end
-                lastItemID = itemID
-                lastDescription = addMulDesc
-                lastSequence = addMulSeq
-            elseif addSeq == latestSeq and addSeq > 0 then
-                lastItemCurrentVal = addLastDelta
-                lastType = "addition"
-                lastItemID = itemID
-                lastDescription = addDesc
-                lastSequence = addSeq
-            elseif baseSeq == latestSeq then
-                lastItemCurrentVal = baseM
-                lastItemID = itemID
-                lastDescription = baseDesc
-                lastSequence = baseSeq
-                lastType = baseType
+            -- Same-source additive stacking rule:
+            -- first additive-multiplier application should be shown as xN (multiplier),
+            -- later updates for the same source remain +/- delta display.
+            local isFirstAddMulForSource = (not baseEnabled)
+                and math.abs((addMulDelta or 0) - (addMulLastDelta or 0)) < 0.00001
+
+            if isFirstAddMulForSource then
+                addMulType = "multiplier"
+                addMulValue = effectiveM
             end
-            StatUtils.printDebug(string.format("  Item %s: base=%.2f, addMulDelta=%+0.2f, eff=%.2f, addCum=%+0.2f", tostring(itemID), baseM, addMulDelta, effectiveM, addCum))
+
+            setDisplayCandidate(addMulSeq, addMulValue, addMulType, itemID, addMulDesc)
         end
+
+        if baseEnabled and baseSeq > 0 then
+            setDisplayCandidate(baseSeq, baseM, baseType, itemID, baseDesc)
+        end
+
+        StatUtils.printDebug(string.format(
+            "  Item %s: base=%.2f (enabled=%s), addMulDelta=%+0.2f (enabled=%s), eff=%.2f, addCum=%+0.2f (enabled=%s)",
+            tostring(itemID),
+            baseM,
+            tostring(baseEnabled),
+            addMulDelta,
+            tostring(addMulEnabled),
+            effectiveM,
+            addCum,
+            tostring(addEnabled)
+        ))
     end
 
     local computedTotalApply = totalMultiplierApply
-    totalMultiplierDisplay = computedTotalApply
+    local vanillaDisplayMultiplier = _getVanillaDisplayMultiplier(player, statType)
+    totalMultiplierDisplay = computedTotalApply * vanillaDisplayMultiplier
 
     if not self[playerID].statMultipliers then
         self[playerID].statMultipliers = {}
     end
 
     self[playerID].statMultipliers[statType] = {
-        current = lastItemCurrentVal,
-        total = totalMultiplierDisplay,
+        current = lastDisplayCurrentVal,
+        displayCurrent = lastDisplayCurrentVal,
+        total = computedTotalApply,
+        totalDisplay = totalMultiplierDisplay,
+        vanillaDisplay = vanillaDisplayMultiplier,
         totalApply = computedTotalApply,
         totalAdditions = totalAdditionApply,
-        lastItemID = lastItemID,
-        description = lastDescription,
-        sequence = lastSequence,
-        currentType = lastType
+        lastItemID = lastDisplayItemID,
+        description = lastDisplayDescription,
+        sequence = lastDisplaySequence,
+        currentType = lastDisplayType,
+        displayType = lastDisplayType,
+        displaySequence = lastDisplaySequence
     }
 
-    if lastType == "addition" then
-        StatUtils.printDebug(string.format("Unified Multipliers: %s recalculated - Current: %+0.2f (from %s, seq: %d), Total: %.2fx (display), Apply: %.2fx",
-            statType, lastItemCurrentVal, tostring(lastItemID), lastSequence, totalMultiplierDisplay, computedTotalApply))
+    if lastDisplayType == "add_mult" or lastDisplayType == "remove_mult" then
+        StatUtils.printDebug(string.format(
+            "Unified Multipliers: %s recalculated - Current: %+0.2f (from %s, seq: %d), Total: %.2fx (display, vanilla %.2fx), Apply: %.2fx",
+            statType,
+            lastDisplayCurrentVal,
+            tostring(lastDisplayItemID),
+            lastDisplaySequence,
+            totalMultiplierDisplay,
+            vanillaDisplayMultiplier,
+            computedTotalApply
+        ))
     else
-        StatUtils.printDebug(string.format("Unified Multipliers: %s recalculated - Current: %.2fx (from %s, seq: %d), Total: %.2fx (display), Apply: %.2fx",
-            statType, lastItemCurrentVal, tostring(lastItemID), lastSequence, totalMultiplierDisplay, computedTotalApply))
+        StatUtils.printDebug(string.format(
+            "Unified Multipliers: %s recalculated - Current: %.2fx (from %s, seq: %d), Total: %.2fx (display, vanilla %.2fx), Apply: %.2fx",
+            statType,
+            lastDisplayCurrentVal,
+            tostring(lastDisplayItemID),
+            lastDisplaySequence,
+            totalMultiplierDisplay,
+            vanillaDisplayMultiplier,
+            computedTotalApply
+        ))
     end
 
     if StatUtils.stats.multiplierDisplay then
-        StatUtils.stats.multiplierDisplay:UpdateFromUnifiedSystem(player, statType, lastItemCurrentVal, totalMultiplierDisplay, lastType)
+        StatUtils.stats.multiplierDisplay:UpdateFromUnifiedSystem(
+            player,
+            statType,
+            lastDisplayCurrentVal,
+            totalMultiplierDisplay,
+            lastDisplayType
+        )
     end
 
     if not self._isEvaluatingCache then
@@ -611,7 +741,8 @@ function StatUtils.stats.unifiedMultipliers:SaveToSaveManager(player)
                         description = data.description,
                         sequence = data.sequence,
                         lastType = data.lastType,
-                        eqMult = data.eqMult
+                        eqMult = data.eqMult,
+                        disabled = data.disabled == true
                     }
                 end
             end
@@ -630,7 +761,8 @@ function StatUtils.stats.unifiedMultipliers:SaveToSaveManager(player)
                         sequence = data.sequence,
                         lastType = data.lastType,
                         eqMult = data.eqMult,
-                        firstAddMultFrame = data.firstAddMultFrame
+                        firstAddMultFrame = data.firstAddMultFrame,
+                        disabled = data.disabled == true
                     }
                 end
             end
@@ -751,7 +883,7 @@ end
 -------------------------------------------------------------------------------
 -- Multiplier Display System (HUD overlay)
 -------------------------------------------------------------------------------
-StatUtils.stats.multiplierDisplay = {}
+StatUtils.stats.multiplierDisplay = StatUtils.stats.multiplierDisplay or {}
 
 local StatsFont = Font()
 StatsFont:Load("font/luaminioutlined.fnt")
@@ -768,28 +900,46 @@ local MULTIPLIER_FADING_DURATION = 40
 local TAB_DISPLAY_DURATION = 10
 local TAB_DISPLAY_FADE_DURATION = 20
 
--- HUD positions for each stat
-local STAT_POSITIONS = {
-    Speed = {x = 75, y = 87},
-    Tears = {x = 75, y = 99},
-    Damage = {x = 75, y = 111},
-    Range = {x = 75, y = 123},
-    ShotSpeed = {x = 75, y = 135},
-    Luck = {x = 75, y = 147}
+-- HUD base positions matched to Stats Plus behavior.
+local SINGLE_PLAYER_STAT_POSITIONS = {
+    Speed = {x = 17, y = 88},
+    Tears = {x = 17, y = 100},
+    Damage = {x = 17, y = 112},
+    Range = {x = 17, y = 124},
+    ShotSpeed = {x = 17, y = 136},
+    Luck = {x = 17, y = 148}
 }
 
-if REPENTANCE_PLUS then
-    STAT_POSITIONS.Speed.y = 90
-    STAT_POSITIONS.Tears.y = 102
-    STAT_POSITIONS.Damage.y = 114
-    STAT_POSITIONS.Range.y = 126
-    STAT_POSITIONS.ShotSpeed.y = 138
-    STAT_POSITIONS.Luck.y = 150
-end
+local MULTI_PLAYER_STAT_POSITIONS = {
+    Speed = {x = 17, y = 84},
+    Tears = {x = 17, y = 98},
+    Damage = {x = 17, y = 112},
+    Range = {x = 17, y = 126},
+    ShotSpeed = {x = 17, y = 140},
+    Luck = {x = 17, y = 154}
+}
+
+local JACOB_MAIN_STAT_POSITIONS = {
+    Speed = {x = 17, y = 87},
+    Tears = {x = 17, y = 96},
+    Damage = {x = 17, y = 110},
+    Range = {x = 17, y = 124},
+    ShotSpeed = {x = 17, y = 138},
+    Luck = {x = 17, y = 152}
+}
+
+local STATS_PLUS_SPACING_X = 5
+local BASE_STAT_OFFSET_X = 48
+local BASE_STAT_OFFSET_Y = 1
 
 StatUtils.stats.multiplierDisplay.playerData = {}
 
 function StatUtils.stats.multiplierDisplay:InitPlayer(player)
+    if not self._tableRefLogged then
+        self._tableRefLogged = true
+        StatUtils.printDebug(string.format("[Display] table ref = %s", tostring(self)))
+    end
+
     local playerID = StatUtils:GetPlayerInstanceKey(player)
     if not self.playerData[playerID] then
         StatUtils.printDebug(string.format("InitPlayer: Creating new player data for player ID %s", playerID))
@@ -881,10 +1031,20 @@ function StatUtils.stats.multiplierDisplay:RefreshFromUnified(player)
     self.playerData[playerID].unifiedData = {}
 
     for statType, data in pairs(all) do
-        local currentType = data.currentType or "multiplier"
+        local currentType = data.displayType or data.currentType or "multiplier"
         if currentType ~= "addition" then
-            local current = type(data.current) == "number" and data.current or 1.0
-            local total = type(data.total) == "number" and data.total or 1.0
+            local current = 1.0
+            if type(data.displayCurrent) == "number" then
+                current = data.displayCurrent
+            elseif type(data.current) == "number" then
+                current = data.current
+            end
+            local total = 1.0
+            if type(data.totalDisplay) == "number" then
+                total = data.totalDisplay
+            elseif type(data.total) == "number" then
+                total = data.total
+            end
             self.playerData[playerID].unifiedData[statType] = {
                 current = current,
                 total = total,
@@ -931,6 +1091,363 @@ local function GetHUDRelativeDisplayOffset()
     return vanillaHUDOffset + customOffset
 end
 
+local function IsMainPlayerJacob()
+    local mainPlayer = Isaac.GetPlayer(0)
+    if not mainPlayer then
+        return false
+    end
+    return mainPlayer:GetPlayerType() == PlayerType.PLAYER_JACOB
+end
+
+local function GetStatBasePosition(statType)
+    local positionSet = SINGLE_PLAYER_STAT_POSITIONS
+    if IsMainPlayerJacob() then
+        positionSet = JACOB_MAIN_STAT_POSITIONS
+    elseif Game():GetNumPlayers() > 1 then
+        positionSet = MULTI_PLAYER_STAT_POSITIONS
+    end
+    return positionSet[statType]
+end
+
+local function HasBethanyInParty()
+    local numPlayers = Game():GetNumPlayers()
+    for i = 0, numPlayers - 1 do
+        local p = Isaac.GetPlayer(i)
+        if p then
+            local pType = p:GetPlayerType()
+            if pType == PlayerType.PLAYER_BETHANY or pType == PlayerType.PLAYER_BETHANY_B then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+local function GetPlayerIndexDisplayOffset(player, renderIndex)
+    local idx = tonumber(renderIndex)
+    if type(idx) ~= "number" then
+        idx = tonumber(player and player.Index) or 0
+    end
+    if idx <= 0 then
+        return 0, 0
+    end
+    return 4, 7 * idx
+end
+
+local function ToFixed(value, digits)
+    if type(value) ~= "number" then
+        return nil
+    end
+
+    local factor = 10 ^ digits
+    local epsilon = 1e-8
+    if value > 0 then
+        return math.floor(value * factor + epsilon) / factor
+    end
+    return math.ceil(value * factor + epsilon) / factor
+end
+
+local function ToFixedFormatted(value, digits)
+    local fixed = ToFixed(value, digits)
+    if type(fixed) ~= "number" then
+        return nil
+    end
+
+    local text = tostring(fixed)
+    if digits <= 0 then
+        return text
+    end
+
+    local dotIndex = string.find(text, ".", 1, true)
+    if not dotIndex then
+        return text .. "." .. string.rep("0", digits)
+    end
+
+    local fractionLength = #text - dotIndex
+    if fractionLength < digits then
+        return text .. string.rep("0", digits - fractionLength)
+    end
+    return text
+end
+
+local function GetDisplayedStatValue(player, statType)
+    if not player or not statType then
+        return nil
+    end
+
+    if statType == "Speed" then
+        return math.min(2, player.MoveSpeed)
+    end
+    if statType == "Tears" then
+        return 30 / (player.MaxFireDelay + 1)
+    end
+    if statType == "Damage" then
+        return player.Damage
+    end
+    if statType == "Range" then
+        return player.TearRange / 40
+    end
+    if statType == "ShotSpeed" then
+        return player.ShotSpeed
+    end
+    if statType == "Luck" then
+        return player.Luck
+    end
+
+    return nil
+end
+
+local function GetDisplayedStatText(player, statType)
+    local value = GetDisplayedStatValue(player, statType)
+    if type(value) ~= "number" then
+        return nil
+    end
+    return ToFixedFormatted(value, 2)
+end
+
+local function GetStatTextWidth(statText)
+    if type(statText) ~= "string" or statText == "" then
+        return 0
+    end
+
+    if type(StatsFont.GetCharacterWidth) == "function" then
+        local width = 0
+        for i = 1, #statText do
+            local ch = string.sub(statText, i, i)
+            local chWidth = StatsFont:GetCharacterWidth(ch)
+            if type(chWidth) == "number" then
+                width = width + chWidth
+            end
+        end
+        return width
+    end
+
+    return StatsFont:GetStringWidth(statText)
+end
+
+local function GetSharedStatTextOffsetX(player)
+    if not player then
+        return 0
+    end
+
+    local referenceWidth = GetStatTextWidth("0.00")
+    local maxWidth = referenceWidth
+    local statTypes = {"Speed", "Tears", "Damage", "Range", "ShotSpeed", "Luck"}
+
+    for _, statType in ipairs(statTypes) do
+        local statText = GetDisplayedStatText(player, statType)
+        local statWidth = GetStatTextWidth(statText)
+        if statWidth > maxWidth then
+            maxWidth = statWidth
+        end
+    end
+
+    return maxWidth - referenceWidth
+end
+
+local _achievementsEnabledCache = nil
+
+local function AreAchievementsEnabled()
+    if type(_achievementsEnabledCache) == "boolean" then
+        return _achievementsEnabledCache
+    end
+
+    local enabled = false
+    local ok, machine = pcall(function()
+        return Isaac.Spawn(6, 11, 0, Vector(0, 0), Vector(0, 0), nil)
+    end)
+    if ok and machine then
+        enabled = machine:Exists()
+        machine:Remove()
+    end
+
+    _achievementsEnabledCache = enabled
+    return enabled
+end
+
+local function GetIconDisplayOffsetY()
+    local challenge = Game().Challenge
+    if type(Isaac.GetChallenge) == "function" then
+        challenge = Isaac.GetChallenge()
+    end
+
+    if Game().Difficulty == Difficulty.DIFFICULTY_NORMAL
+        and challenge == Challenge.CHALLENGE_NULL
+        and AreAchievementsEnabled() then
+        return -16
+    end
+    return 0
+end
+
+local VANILLA_DISPLAY_TRACKED_STATS = {"Damage", "Tears"}
+
+local function GetUnifiedStatEntry(player, statType)
+    if not player
+        or not StatUtils
+        or not StatUtils.stats
+        or not StatUtils.stats.unifiedMultipliers
+        or type(StatUtils.GetPlayerInstanceKey) ~= "function" then
+        return nil
+    end
+
+    local unified = StatUtils.stats.unifiedMultipliers
+    local playerID = StatUtils:GetPlayerInstanceKey(player)
+    local perPlayer = unified and unified[playerID]
+    return perPlayer and perPlayer.statMultipliers and perPlayer.statMultipliers[statType] or nil
+end
+
+local function HasActiveCustomContribution(player, statType)
+    if not player
+        or not StatUtils
+        or not StatUtils.stats
+        or not StatUtils.stats.unifiedMultipliers
+        or type(StatUtils.GetPlayerInstanceKey) ~= "function" then
+        return false
+    end
+
+    local unified = StatUtils.stats.unifiedMultipliers
+    local playerID = StatUtils:GetPlayerInstanceKey(player)
+    local perPlayer = unified and unified[playerID]
+    if type(perPlayer) ~= "table" then
+        return false
+    end
+
+    local function hasEnabledEntry(bucket)
+        if type(bucket) ~= "table" then
+            return false
+        end
+        for _, perItem in pairs(bucket) do
+            if type(perItem) == "table" then
+                local entry = perItem[statType]
+                if type(entry) == "table" and entry.disabled ~= true then
+                    return true
+                end
+            end
+        end
+        return false
+    end
+
+    if hasEnabledEntry(perPlayer.itemMultipliers) then
+        return true
+    end
+    if hasEnabledEntry(perPlayer.itemAdditions) then
+        return true
+    end
+    if hasEnabledEntry(perPlayer.itemAdditiveMultipliers) then
+        return true
+    end
+
+    return false
+end
+
+local function SyncVanillaOnlyDisplayData(player, data)
+    if not player or type(data) ~= "table" then
+        return false
+    end
+
+    if type(data.unifiedData) ~= "table" then
+        data.unifiedData = {}
+    end
+    if type(data.vanillaSnapshot) ~= "table" then
+        data.vanillaSnapshot = {}
+    end
+
+    local changed = false
+    local trackingEnabled = _isVanillaDisplayTrackingEnabled()
+    local currentFrame = Game():GetFrameCount()
+
+    for _, statType in ipairs(VANILLA_DISPLAY_TRACKED_STATS) do
+        local vanillaMult = trackingEnabled and _getVanillaDisplayMultiplier(player, statType) or 1.0
+        local prevVanillaMult = data.vanillaSnapshot[statType]
+        if type(prevVanillaMult) ~= "number" then
+            prevVanillaMult = 1.0
+        end
+        if math.abs(vanillaMult - prevVanillaMult) > 0.00001 then
+            changed = true
+        end
+        data.vanillaSnapshot[statType] = vanillaMult
+
+        local existing = data.unifiedData[statType]
+        local hasActiveCustom = HasActiveCustomContribution(player, statType)
+        local shouldShowVanillaOnly = trackingEnabled and vanillaMult ~= 1.0 and not hasActiveCustom
+
+        if shouldShowVanillaOnly then
+            local prevCurrent = type(existing) == "table" and existing.current or nil
+            if type(prevCurrent) ~= "number" or math.abs(prevCurrent - vanillaMult) > 0.00001 then
+                changed = true
+            end
+            data.unifiedData[statType] = {
+                current = vanillaMult,
+                -- Keep this as pure apply value (x1.00). Live vanilla multiplier gets
+                -- merged in GetLiveDisplayTotalMultiplier().
+                total = 1.0,
+                currentType = "multiplier",
+                timestamp = currentFrame,
+                isVanillaOnly = true
+            }
+        elseif type(existing) == "table" and existing.isVanillaOnly == true then
+            data.unifiedData[statType] = nil
+            changed = true
+        end
+    end
+
+    return changed
+end
+
+local function GetLiveDisplayTotalMultiplier(player, statType, fallbackTotal)
+    local baseTotal = nil
+
+    local statEntry = GetUnifiedStatEntry(player, statType)
+    if type(statEntry) == "table" then
+        if type(statEntry.totalApply) == "number" then
+            baseTotal = statEntry.totalApply
+        elseif type(statEntry.total) == "number" then
+            baseTotal = statEntry.total
+        end
+    end
+
+    if type(baseTotal) ~= "number" then
+        if type(fallbackTotal) == "number" then
+            baseTotal = fallbackTotal
+        else
+            baseTotal = 1.0
+        end
+    end
+
+    local vanillaDisplayMultiplier = _getVanillaDisplayMultiplier(player, statType)
+    return baseTotal * vanillaDisplayMultiplier
+end
+
+local function GetLiveDisplayCurrent(player, statType, fallbackCurrent, fallbackType)
+    local statEntry = GetUnifiedStatEntry(player, statType)
+    if type(statEntry) == "table" then
+        local sequence = statEntry.displaySequence
+        if type(sequence) ~= "number" then
+            sequence = statEntry.sequence
+        end
+        if type(sequence) ~= "number" or sequence <= 0 then
+            return fallbackCurrent, fallbackType
+        end
+
+        local current = statEntry.displayCurrent
+        local currentType = statEntry.displayType
+        if type(current) == "number"
+            and type(currentType) == "string"
+            and currentType ~= "addition" then
+            return current, currentType
+        end
+
+        current = statEntry.current
+        currentType = statEntry.currentType
+        if type(current) == "number"
+            and type(currentType) == "string"
+            and currentType ~= "addition" then
+            return current, currentType
+        end
+    end
+    return fallbackCurrent, fallbackType
+end
+
 -- Render a single multiplier stat
 local function RenderMultiplierStat(statType, currentValue, totalMult, currentType, pos, alpha)
     if type(currentValue) ~= "number" or type(totalMult) ~= "number" then
@@ -951,8 +1468,6 @@ local function RenderMultiplierStat(statType, currentValue, totalMult, currentTy
     if currentType ~= "addition" then
         totalValue = string.format("/x%.2f", totalMult)
     end
-
-    pos = pos + Game().ScreenShakeOffset
 
     local currentColor
     if currentType == "addition" or currentType == "add_mult" or currentType == "remove_mult" then
@@ -1010,12 +1525,16 @@ local function RenderMultiplierStat(statType, currentValue, totalMult, currentTy
 end
 
 -- Render multiplier display for a player
-function StatUtils.stats.multiplierDisplay:RenderPlayer(player)
+function StatUtils.stats.multiplierDisplay:RenderPlayer(player, renderIndex, hasBethanyParty)
+    self:InitPlayer(player)
     local playerID = StatUtils:GetPlayerInstanceKey(player)
-
-    if not self.playerData[playerID] then return end
-
     local data = self.playerData[playerID]
+
+    local vanillaChanged = SyncVanillaOnlyDisplayData(player, data)
+    if vanillaChanged then
+        data.displayStartFrame = Game():GetFrameCount()
+        data.isDisplaying = true
+    end
 
     if not data.unifiedData or not next(data.unifiedData) then
         return
@@ -1089,13 +1608,8 @@ function StatUtils.stats.multiplierDisplay:RenderPlayer(player)
         end
     else
         local duration = currentFrame - data.displayStartFrame
-
-        local animationOffset = 0
         if duration <= MULTIPLIER_MOVEMENT_DURATION then
             local percent = duration / MULTIPLIER_MOVEMENT_DURATION
-            local movementPercent = math.sin((percent * math.pi) / 2)
-
-            animationOffset = 20 + (0 - 20) * movementPercent
             alpha = 0 + (0.5 - 0) * percent
         end
 
@@ -1105,36 +1619,14 @@ function StatUtils.stats.multiplierDisplay:RenderPlayer(player)
         end
     end
 
-    -- Multiplayer adjustments
-    local multiplayerOffset = 0
-    if Game():GetNumPlayers() > 1 then
-        if player:GetPlayerType() == PlayerType.PLAYER_ISAAC then
-            multiplayerOffset = -4
-        else
-            multiplayerOffset = 4
-        end
-    end
+    local playerOffsetX, playerOffsetY = GetPlayerIndexDisplayOffset(player, renderIndex)
 
-    -- Challenge mode adjustments
-    local challengeOffset = 0
-    if Game().Challenge == Challenge.CHALLENGE_NULL
-    and Game().Difficulty == Difficulty.DIFFICULTY_NORMAL then
-        challengeOffset = -15.5
+    if hasBethanyParty == nil then
+        hasBethanyParty = HasBethanyInParty()
     end
-
-    -- Character-specific adjustments
-    local characterOffset = 0
-    if player:GetPlayerType() == PlayerType.PLAYER_BETHANY then
-        characterOffset = 10
-    elseif player:GetPlayerType() == PlayerType.PLAYER_BETHANY_B then
-        characterOffset = 10
-    elseif player:GetPlayerType() == PlayerType.PLAYER_BLUEBABY_B then
-        characterOffset = 10
-    end
-
-    if player:GetPlayerType() == PlayerType.PLAYER_JACOB or player:GetPlayerType() == PlayerType.PLAYER_ESAU then
-        characterOffset = characterOffset + 16
-    end
+    local bethanyPartyOffset = hasBethanyParty and 9 or 0
+    local jacobMainOffset = IsMainPlayerJacob() and 16 or 0
+    local iconOffset = GetIconDisplayOffsetY()
 
     -- Animation effects
     local animationOffset = 0
@@ -1149,20 +1641,26 @@ function StatUtils.stats.multiplierDisplay:RenderPlayer(player)
         animationOffset = 0
     end
 
-    -- Render each stat multiplier
-    local renderedCount = 0
-    -- Keep the overlay anchored to Isaac HUD offset, then apply user X/Y tweak from MCM.
+    -- Render each stat multiplier.
     local hudRelativeOffset = GetHUDRelativeDisplayOffset()
+    local screenShakeOffset = Game().ScreenShakeOffset
+    local sharedStatTextOffsetX = GetSharedStatTextOffsetX(player)
 
     for statType, multiplierData in pairs(data.unifiedData) do
-        local statPos = STAT_POSITIONS[statType]
+        local statPos = GetStatBasePosition(statType)
         if statPos then
-            local finalX = statPos.x - animationOffset
-            local finalY = statPos.y + multiplayerOffset + challengeOffset + characterOffset
-            local pos = Vector(finalX, finalY) + hudRelativeOffset
+            local finalX = statPos.x + BASE_STAT_OFFSET_X + playerOffsetX + sharedStatTextOffsetX + STATS_PLUS_SPACING_X - animationOffset
+            local finalY = statPos.y + BASE_STAT_OFFSET_Y + playerOffsetY + bethanyPartyOffset + jacobMainOffset + iconOffset
+            local pos = Vector(finalX, finalY) + hudRelativeOffset + screenShakeOffset
+            local totalDisplay = GetLiveDisplayTotalMultiplier(player, statType, multiplierData.total)
+            local currentDisplay, currentTypeDisplay = GetLiveDisplayCurrent(
+                player,
+                statType,
+                multiplierData.current,
+                multiplierData.currentType
+            )
 
-            RenderMultiplierStat(statType, multiplierData.current, multiplierData.total, multiplierData.currentType, pos, alpha)
-            renderedCount = renderedCount + 1
+            RenderMultiplierStat(statType, currentDisplay, totalDisplay, currentTypeDisplay, pos, alpha)
         end
     end
 end
@@ -1175,11 +1673,12 @@ function StatUtils.stats.multiplierDisplay:Render()
 
     local playerCount = 0
     local numPlayers = Game():GetNumPlayers()
+    local hasBethanyParty = HasBethanyInParty()
 
     for i = 0, numPlayers - 1 do
         local player = Isaac.GetPlayer(i)
         if player then
-            self:RenderPlayer(player)
+            self:RenderPlayer(player, i, hasBethanyParty)
             playerCount = playerCount + 1
         end
     end

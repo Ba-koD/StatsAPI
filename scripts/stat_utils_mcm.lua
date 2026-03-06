@@ -25,8 +25,15 @@ local function ensureSettingsTable()
         StatUtils.settings = {
             displayEnabled = true,
             displayOffsetX = 0,
-            displayOffsetY = 0
+            displayOffsetY = 0,
+            trackVanillaDisplay = true,
+            debugEnabled = false
         }
+    elseif StatUtils.settings.trackVanillaDisplay == nil then
+        StatUtils.settings.trackVanillaDisplay = true
+    end
+    if StatUtils.settings.debugEnabled == nil then
+        StatUtils.settings.debugEnabled = false
     end
     return StatUtils.settings
 end
@@ -55,9 +62,27 @@ local function resetDisplayDefaults()
         return
     end
 
+    local previousTrackVanilla = settings.trackVanillaDisplay
+    local previousDebugEnabled = settings.debugEnabled == true
     settings.displayEnabled = true
     settings.displayOffsetX = 0
     settings.displayOffsetY = 0
+    settings.trackVanillaDisplay = true
+    settings.debugEnabled = false
+
+    if previousTrackVanilla ~= true
+        and StatUtils
+        and type(StatUtils.SetVanillaDisplayTrackingEnabled) == "function" then
+        StatUtils:SetVanillaDisplayTrackingEnabled(true)
+    end
+
+    if previousDebugEnabled
+        and StatUtils
+        and type(StatUtils.SetDebugModeEnabled) == "function" then
+        StatUtils:SetDebugModeEnabled(false)
+    elseif StatUtils then
+        StatUtils.DEBUG = false
+    end
 
     if StatUtils and StatUtils.stats and StatUtils.stats.multiplierDisplay
         and type(StatUtils.stats.multiplierDisplay.RefreshAllFromUnified) == "function" then
@@ -81,6 +106,28 @@ local function getDisplayEnabled()
         return StatUtils:IsDisplayEnabled()
     end
     return true
+end
+
+local function getTrackVanillaDisplay()
+    if StatUtils and type(StatUtils.IsVanillaDisplayTrackingEnabled) == "function" then
+        return StatUtils:IsVanillaDisplayTrackingEnabled()
+    end
+    local settings = ensureSettingsTable()
+    if settings then
+        return settings.trackVanillaDisplay ~= false
+    end
+    return true
+end
+
+local function getDebugEnabled()
+    if StatUtils and type(StatUtils.IsDebugModeEnabled) == "function" then
+        return StatUtils:IsDebugModeEnabled()
+    end
+    local settings = ensureSettingsTable()
+    if settings then
+        return settings.debugEnabled == true
+    end
+    return StatUtils and StatUtils.DEBUG == true or false
 end
 
 local function getDisplayOffsetX()
@@ -141,6 +188,77 @@ function M.Setup()
         end
     })
 
+    ModConfigMenu.AddSetting(category, subcategory, {
+        Type = ModConfigMenu.OptionType.BOOLEAN,
+        CurrentSetting = function()
+            return getTrackVanillaDisplay()
+        end,
+        Display = function()
+            local enabled = getTrackVanillaDisplay()
+            return "Track Vanilla Multiplier: " .. (enabled and "ON" or "OFF")
+        end,
+        Info = {
+            "Include vanilla character/item multipliers in total display.",
+            "Applies per-player (item holder character context)."
+        },
+        OnChange = function(value)
+            local enabled = value ~= false
+            if StatUtils and type(StatUtils.SetVanillaDisplayTrackingEnabled) == "function" then
+                StatUtils:SetVanillaDisplayTrackingEnabled(enabled)
+                return
+            end
+
+            local settings = ensureSettingsTable()
+            if not settings then
+                return
+            end
+            settings.trackVanillaDisplay = enabled
+
+            if StatUtils and StatUtils.stats and StatUtils.stats.multiplierDisplay
+                and type(StatUtils.stats.multiplierDisplay.RefreshAllFromUnified) == "function" then
+                StatUtils.stats.multiplierDisplay:RefreshAllFromUnified()
+            end
+
+            if StatUtils and type(StatUtils.SaveRunData) == "function" then
+                StatUtils:SaveRunData()
+            end
+        end
+    })
+
+    ModConfigMenu.AddSetting(category, subcategory, {
+        Type = ModConfigMenu.OptionType.BOOLEAN,
+        CurrentSetting = function()
+            return getDebugEnabled()
+        end,
+        Display = function()
+            local enabled = getDebugEnabled()
+            return "Debug Mode (Watcher Log): " .. (enabled and "ON" or "OFF")
+        end,
+        Info = {
+            "Enable debug mode and show watcher runtime logs at bottom-left.",
+            "Used by watch.sh runtime queue MSG/CMD notifications."
+        },
+        OnChange = function(value)
+            local enabled = value == true
+            if StatUtils and type(StatUtils.SetDebugModeEnabled) == "function" then
+                StatUtils:SetDebugModeEnabled(enabled)
+                return
+            end
+
+            local settings = ensureSettingsTable()
+            if not settings then
+                return
+            end
+            settings.debugEnabled = enabled
+            if StatUtils then
+                StatUtils.DEBUG = enabled
+            end
+            if StatUtils and type(StatUtils.SaveRunData) == "function" then
+                StatUtils:SaveRunData()
+            end
+        end
+    })
+
     if ModConfigMenu.OptionType.NUMBER ~= nil then
         ModConfigMenu.AddSetting(category, subcategory, {
             Type = ModConfigMenu.OptionType.NUMBER,
@@ -194,7 +312,7 @@ function M.Setup()
         end,
         Info = {
             "Reset Multiplier HUD to defaults:",
-            "Display ON, Offset X 0, Offset Y 0."
+            "Display ON, Track Vanilla ON, Debug OFF, Offset X 0, Offset Y 0."
         },
         OnChange = function(value)
             if value then

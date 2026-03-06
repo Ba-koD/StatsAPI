@@ -2,7 +2,9 @@
 -- Based on Epiphany mod's collectible_damage_multipliers.lua (Repentance+ accurate)
 -- Provides vanilla item/character damage and fire rate multiplier lookup
 
-StatUtils.VanillaMultipliers = {}
+StatUtils.VanillaMultipliers = StatUtils.VanillaMultipliers or {}
+local IS_REPENTANCE_PLUS = rawget(_G, "REPENTANCE_PLUS") == true
+local TWENTY_TWENTY_DAMAGE_MULT = IS_REPENTANCE_PLUS and 0.8 or 0.75
 
 -- Damage multipliers for vanilla collectibles (Rep+ accurate, from Epiphany)
 StatUtils.VanillaMultipliers.CollectibleDamage = {
@@ -28,7 +30,8 @@ StatUtils.VanillaMultipliers.CollectibleDamage = {
     [CollectibleType.COLLECTIBLE_SACRED_HEART] = 2.3,
     [CollectibleType.COLLECTIBLE_EVES_MASCARA] = 2,
     [CollectibleType.COLLECTIBLE_ODD_MUSHROOM_THIN] = 0.9,
-    [CollectibleType.COLLECTIBLE_20_20] = 0.75,
+    -- Stats Plus parity: 20/20 uses x0.80 in Rep+, x0.75 otherwise.
+    [CollectibleType.COLLECTIBLE_20_20] = TWENTY_TWENTY_DAMAGE_MULT,
     [CollectibleType.COLLECTIBLE_SOY_MILK] = function(player)
         if player:HasCollectible(CollectibleType.COLLECTIBLE_ALMOND_MILK) then return 1 end
         return 0.2
@@ -69,7 +72,7 @@ StatUtils.VanillaMultipliers.CharacterDamage = {
     [PlayerType.PLAYER_ESAU] = 1,
     [PlayerType.PLAYER_ISAAC_B] = 1,
     [PlayerType.PLAYER_MAGDALENE_B] = 0.75,
-    [PlayerType.PLAYER_CAIN_B] = 1,
+    [PlayerType.PLAYER_CAIN_B] = 1.2,
     [PlayerType.PLAYER_JUDAS_B] = 1,
     [PlayerType.PLAYER_BLUEBABY_B] = 1,
     [PlayerType.PLAYER_EVE_B] = 1.2,
@@ -97,10 +100,14 @@ function StatUtils.VanillaMultipliers:GetPlayerDamageMultiplier(player)
     local totalMultiplier = 1.0
 
     if charMult then
+        local resolved = nil
         if type(charMult) == "function" then
-            totalMultiplier = charMult(player)
+            resolved = charMult(player)
         else
-            totalMultiplier = charMult
+            resolved = charMult
+        end
+        if type(resolved) == "number" then
+            totalMultiplier = resolved
         end
     end
 
@@ -111,7 +118,9 @@ function StatUtils.VanillaMultipliers:GetPlayerDamageMultiplier(player)
             if type(mult) == "function" then
                 actualMult = mult(player)
             end
-            totalMultiplier = totalMultiplier * actualMult
+            if type(actualMult) == "number" then
+                totalMultiplier = totalMultiplier * actualMult
+            end
         end
     end
 
@@ -137,8 +146,13 @@ function StatUtils.VanillaMultipliers:GetPlayerFireRateMultiplier(player)
         multi = multi * 5.5
     end
 
-    if player:HasCollectible(CollectibleType.COLLECTIBLE_POLYPHEMUS) then
-        multi = multi * 0.42
+    if not player:HasCollectible(CollectibleType.COLLECTIBLE_20_20) then
+        if player:HasCollectible(CollectibleType.COLLECTIBLE_MUTANT_SPIDER)
+            or player:HasCollectible(CollectibleType.COLLECTIBLE_POLYPHEMUS) then
+            multi = multi * 0.42
+        elseif player:HasCollectible(CollectibleType.COLLECTIBLE_INNER_EYE) then
+            multi = multi * 0.51
+        end
     end
 
     if player:HasCollectible(CollectibleType.COLLECTIBLE_EVES_MASCARA) then
