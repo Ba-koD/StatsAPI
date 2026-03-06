@@ -199,6 +199,7 @@ um:SetItemMultiplierDisabled(player, ITEM_KEY, "Damage", false)
 - `SetItemMultiplierDisabled` only applies to multiplier entries (`SetItemMultiplier`).
 - Disabled state is persisted through save/load.
 - If Mod Config Menu is installed, you can toggle HUD rendering at `StatsAPI > Display > Multiplier HUD`, and choose `Last Multiplier / Final Multiplier / Both` at `HUD Display Mode`.
+- You can configure `Hold To Show`, `Fade In`, and `Fade Out` independently (in seconds) at `StatsAPI > Timing`.
 - HUD position follows Isaac's `Options.HUDOffset`, and can be fine-tuned with `StatsAPI > Display > HUD Offset X/Y`.
 - `RemoveItemAddition` removes additive multiplier data as well.
 - `statType` typos/case mismatch will not apply.

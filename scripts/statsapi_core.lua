@@ -28,16 +28,55 @@ end
 StatsAPI.mod = mod
 StatsAPI.VERSION = "1.0.0"
 StatsAPI.DEBUG = StatsAPI.DEBUG == true
+StatsAPI._runtimePendingNoticeChecked = false
 local DISPLAY_MODE_LAST = "last"
 local DISPLAY_MODE_FINAL = "final"
 local DISPLAY_MODE_BOTH = "both"
+local TAB_HOLD_SECONDS_MIN = 0
+local TAB_HOLD_SECONDS_MAX = 10
+local DISPLAY_DURATION_SECONDS_MIN = 0
+local DISPLAY_DURATION_SECONDS_MAX = 30
+local FADE_IN_SECONDS_MIN = 0
+local FADE_IN_SECONDS_MAX = 10
+local FADE_OUT_SECONDS_MIN = 0
+local FADE_OUT_SECONDS_MAX = 10
+local DEFAULT_TAB_HOLD_SECONDS = 0
+local DEFAULT_DISPLAY_DURATION_SECONDS = 5
+local DEFAULT_FADE_IN_SECONDS = 0.2
+local DEFAULT_FADE_OUT_SECONDS = 0.6
+local TICKS_PER_SECOND = 30
+local SETTINGS_LEGACY_KEY_ALIASES = {
+    displayEnabled = { "hudEnabled", "multiplierHudEnabled" },
+    displayOffsetX = { "hudOffsetX", "offsetX" },
+    displayOffsetY = { "hudOffsetY", "offsetY" },
+    trackVanillaDisplay = { "trackVanilla", "trackVanillaMultiplier" },
+    debugEnabled = { "debugMode", "debug" },
+    displayMode = { "hudDisplayMode", "multiplierDisplayMode" },
+    tabHoldSeconds = { "tabHold", "tabShowDelaySeconds", "tabHoldFrames" },
+    displayDurationSeconds = { "displayDuration", "hudVisibleSeconds", "displayDurationFrames" },
+    fadeInSeconds = { "fadeIn", "hudFadeInSeconds", "tabFadeInSeconds", "fadeInFrames" },
+    fadeOutSeconds = {
+        "fadeOut",
+        "hudFadeOutSeconds",
+        "tabFadeOutSeconds",
+        "fadeOutFrames",
+        "displayDurationSeconds",
+        "displayDuration",
+        "hudVisibleSeconds",
+        "displayDurationFrames"
+    }
+}
 StatsAPI.DEFAULT_SETTINGS = {
     displayEnabled = true,
     displayOffsetX = 0,
     displayOffsetY = 0,
     trackVanillaDisplay = true,
     debugEnabled = false,
-    displayMode = DISPLAY_MODE_BOTH
+    displayMode = DISPLAY_MODE_BOTH,
+    tabHoldSeconds = DEFAULT_TAB_HOLD_SECONDS,
+    displayDurationSeconds = DEFAULT_DISPLAY_DURATION_SECONDS,
+    fadeInSeconds = DEFAULT_FADE_IN_SECONDS,
+    fadeOutSeconds = DEFAULT_FADE_OUT_SECONDS
 }
 if type(StatsAPI.settings) ~= "table" then
     StatsAPI.settings = {
@@ -46,7 +85,11 @@ if type(StatsAPI.settings) ~= "table" then
         displayOffsetY = 0,
         trackVanillaDisplay = true,
         debugEnabled = false,
-        displayMode = DISPLAY_MODE_BOTH
+        displayMode = DISPLAY_MODE_BOTH,
+        tabHoldSeconds = DEFAULT_TAB_HOLD_SECONDS,
+        displayDurationSeconds = DEFAULT_DISPLAY_DURATION_SECONDS,
+        fadeInSeconds = DEFAULT_FADE_IN_SECONDS,
+        fadeOutSeconds = DEFAULT_FADE_OUT_SECONDS
     }
 end
 if StatsAPI.DEBUG then
@@ -156,23 +199,39 @@ function StatsAPI:RenderRuntimeNotice()
     local startY = Isaac.GetScreenHeight() - RUNTIME_TEXT_BOTTOM_PADDING - ((#RuntimeOverlay.messages - 1) * lineHeight)
 
     for i, entry in ipairs(RuntimeOverlay.messages) do
-        local color = KColor(1, 1, 1, alpha)
+        local red, green, blue = 1, 1, 1
         if entry.kind == "success" then
-            color = KColor(0, 1, 0, alpha)
+            red, green, blue = 0, 1, 0
         elseif entry.kind == "error" then
-            color = KColor(1, 0, 0, alpha)
+            red, green, blue = 1, 0, 0
         end
+        local color = KColor(red, green, blue, alpha)
 
-        RuntimeOverlay.font:DrawStringScaledUTF8(
-            entry.text,
-            x,
-            startY + ((i - 1) * lineHeight),
-            RUNTIME_TEXT_SCALE,
-            RUNTIME_TEXT_SCALE,
-            color,
-            0,
-            true
-        )
+        local drawX = x
+        local drawY = startY + ((i - 1) * lineHeight)
+        if type(RuntimeOverlay.font.DrawStringScaledUTF8) == "function" then
+            RuntimeOverlay.font:DrawStringScaledUTF8(
+                entry.text,
+                drawX,
+                drawY,
+                RUNTIME_TEXT_SCALE,
+                RUNTIME_TEXT_SCALE,
+                color,
+                0,
+                true
+            )
+        elseif type(RuntimeOverlay.font.DrawString) == "function" then
+            RuntimeOverlay.font:DrawString(
+                entry.text,
+                drawX,
+                drawY,
+                color,
+                0,
+                true
+            )
+        else
+            Isaac.RenderText(entry.text, drawX, drawY, red, green, blue, alpha)
+        end
     end
 end
 
@@ -181,7 +240,7 @@ end
 ---------------------------------------------
 StatsAPI._runData = { players = {} }
 local RUNTIME_QUEUE_PREFIX = "__SAPIQ__"
-local RUNTIME_POLL_INTERVAL = 3
+local RUNTIME_POLL_INTERVAL = 20
 local _lastRuntimePollFrame = -RUNTIME_POLL_INTERVAL
 
 local function _startsWith(text, prefix)
@@ -190,13 +249,40 @@ local function _startsWith(text, prefix)
         and string.sub(text, 1, #prefix) == prefix
 end
 
+local function _saveRawModData(modRef, raw)
+    if not modRef or type(raw) ~= "string" then
+        return false
+    end
+
+    local ok = false
+    if type(Isaac) == "table" and type(Isaac.SaveModData) == "function" then
+        ok = pcall(function()
+            Isaac.SaveModData(modRef, raw)
+        end)
+    else
+        ok = pcall(function()
+            modRef:SaveData(raw)
+        end)
+    end
+    return ok
+end
+
 local function _getRawModData(modRef)
     if not modRef or not modRef:HasData() then
         return ""
     end
-    local ok, raw = pcall(function()
-        return modRef:LoadData()
-    end)
+
+    local ok = false
+    local raw = ""
+    if type(Isaac) == "table" and type(Isaac.LoadModData) == "function" then
+        ok, raw = pcall(function()
+            return Isaac.LoadModData(modRef)
+        end)
+    else
+        ok, raw = pcall(function()
+            return modRef:LoadData()
+        end)
+    end
     if ok and type(raw) == "string" then
         return raw
     end
@@ -220,6 +306,17 @@ local function _extractPersistentData(raw)
         return "{}"
     end
     return cleaned
+end
+
+local function _decodePersistentObject(raw)
+    local persistent = _extractPersistentData(raw)
+    local ok, data = pcall(function()
+        return json.decode(persistent)
+    end)
+    if ok and type(data) == "table" then
+        return data
+    end
+    return {}
 end
 
 local function _parseRuntimeQueue(raw)
@@ -255,11 +352,86 @@ local function _consumeRuntimeQueue(modRef)
     end
 
     local persistent = _extractPersistentData(raw)
-    pcall(function()
-        modRef:SaveData(persistent)
-    end)
+    _saveRawModData(modRef, persistent)
 
     return queue
+end
+
+local function _setPendingRuntimeNotice(modRef, message)
+    if type(message) ~= "string" or message == "" then
+        return
+    end
+    if not modRef then
+        return
+    end
+
+    local raw = _getRawModData(modRef)
+    local data = _decodePersistentObject(raw)
+    if type(data.runData) ~= "table" and type(StatsAPI._runData) == "table" then
+        data.runData = StatsAPI._runData
+    end
+    if type(data.settings) ~= "table" and type(_normalizeSettings) == "function" then
+        data.settings = _normalizeSettings(StatsAPI.settings)
+    end
+    if type(data.runtime) ~= "table" then
+        data.runtime = {}
+    end
+    data.runtime.pendingNotice = message
+
+    local encoded = nil
+    local ok, result = pcall(function()
+        return json.encode(data)
+    end)
+    if ok and type(result) == "string" then
+        encoded = result
+    end
+    if encoded then
+        _saveRawModData(modRef, encoded)
+    end
+end
+
+local function _consumePendingRuntimeNotice(modRef)
+    if not modRef then
+        return nil
+    end
+
+    local raw = _getRawModData(modRef)
+    if raw == "" then
+        return nil
+    end
+
+    local data = _decodePersistentObject(raw)
+    if type(data.runtime) ~= "table" then
+        return nil
+    end
+
+    local notice = data.runtime.pendingNotice
+    if type(notice) ~= "string" or notice == "" then
+        return nil
+    end
+
+    data.runtime.pendingNotice = nil
+    if next(data.runtime) == nil then
+        data.runtime = nil
+    end
+    if type(data.runData) ~= "table" and type(StatsAPI._runData) == "table" then
+        data.runData = StatsAPI._runData
+    end
+    if type(data.settings) ~= "table" and type(_normalizeSettings) == "function" then
+        data.settings = _normalizeSettings(StatsAPI.settings)
+    end
+
+    local encoded = nil
+    local ok, result = pcall(function()
+        return json.encode(data)
+    end)
+    if ok and type(result) == "string" then
+        encoded = result
+    end
+    if encoded then
+        _saveRawModData(modRef, encoded)
+    end
+    return notice
 end
 
 local function normalizeDisplayMode(value, defaultValue)
@@ -315,6 +487,24 @@ local function normalizeDisplayMode(value, defaultValue)
     return fallback
 end
 
+local function normalizeSeconds(value, defaultValue, minValue, maxValue)
+    local num = nil
+    if type(value) == "number" then
+        num = value
+    elseif type(value) == "string" then
+        num = tonumber(value)
+    end
+    if type(num) ~= "number" then
+        num = defaultValue
+    end
+    if num < minValue then
+        num = minValue
+    elseif num > maxValue then
+        num = maxValue
+    end
+    return math.floor((num * 100) + 0.5) / 100
+end
+
 _normalizeSettings = function(rawSettings)
     local function clampNumber(value, minValue, maxValue)
         if value < minValue then
@@ -368,21 +558,91 @@ _normalizeSettings = function(rawSettings)
         return clampNumber(num, minValue, maxValue)
     end
 
+    local function getSettingValue(settings, key)
+        if type(settings) ~= "table" then
+            return nil, nil
+        end
+        if settings[key] ~= nil then
+            return settings[key], key
+        end
+        local aliases = SETTINGS_LEGACY_KEY_ALIASES[key]
+        if type(aliases) == "table" then
+            for _, alias in ipairs(aliases) do
+                if settings[alias] ~= nil then
+                    return settings[alias], alias
+                end
+            end
+        end
+        return nil, nil
+    end
+
     local normalized = {
-        displayEnabled = true,
-        displayOffsetX = 0,
-        displayOffsetY = 0,
-        trackVanillaDisplay = true,
-        debugEnabled = false,
-        displayMode = DISPLAY_MODE_BOTH
+        displayEnabled = StatsAPI.DEFAULT_SETTINGS.displayEnabled,
+        displayOffsetX = StatsAPI.DEFAULT_SETTINGS.displayOffsetX,
+        displayOffsetY = StatsAPI.DEFAULT_SETTINGS.displayOffsetY,
+        trackVanillaDisplay = StatsAPI.DEFAULT_SETTINGS.trackVanillaDisplay,
+        debugEnabled = StatsAPI.DEFAULT_SETTINGS.debugEnabled,
+        displayMode = StatsAPI.DEFAULT_SETTINGS.displayMode,
+        tabHoldSeconds = StatsAPI.DEFAULT_SETTINGS.tabHoldSeconds,
+        displayDurationSeconds = StatsAPI.DEFAULT_SETTINGS.displayDurationSeconds,
+        fadeInSeconds = StatsAPI.DEFAULT_SETTINGS.fadeInSeconds,
+        fadeOutSeconds = StatsAPI.DEFAULT_SETTINGS.fadeOutSeconds
     }
     if type(rawSettings) == "table" then
-        normalized.displayEnabled = toBoolean(rawSettings.displayEnabled, true)
-        normalized.displayOffsetX = toInteger(rawSettings.displayOffsetX, 0, -200, 200)
-        normalized.displayOffsetY = toInteger(rawSettings.displayOffsetY, 0, -200, 200)
-        normalized.trackVanillaDisplay = toBoolean(rawSettings.trackVanillaDisplay, true)
-        normalized.debugEnabled = toBoolean(rawSettings.debugEnabled, false)
-        normalized.displayMode = normalizeDisplayMode(rawSettings.displayMode, DISPLAY_MODE_BOTH)
+        local displayEnabledValue = select(1, getSettingValue(rawSettings, "displayEnabled"))
+        local displayOffsetXValue = select(1, getSettingValue(rawSettings, "displayOffsetX"))
+        local displayOffsetYValue = select(1, getSettingValue(rawSettings, "displayOffsetY"))
+        local trackVanillaValue = select(1, getSettingValue(rawSettings, "trackVanillaDisplay"))
+        local debugEnabledValue = select(1, getSettingValue(rawSettings, "debugEnabled"))
+        local displayModeValue = select(1, getSettingValue(rawSettings, "displayMode"))
+        local tabHoldValue, tabHoldSource = getSettingValue(rawSettings, "tabHoldSeconds")
+        local displayDurationValue, displayDurationSource = getSettingValue(rawSettings, "displayDurationSeconds")
+        local fadeInValue, fadeInSource = getSettingValue(rawSettings, "fadeInSeconds")
+        local fadeOutValue, fadeOutSource = getSettingValue(rawSettings, "fadeOutSeconds")
+
+        if tabHoldSource == "tabHoldFrames" then
+            tabHoldValue = (tonumber(tabHoldValue) or 0) / TICKS_PER_SECOND
+        end
+        if displayDurationSource == "displayDurationFrames" then
+            displayDurationValue = (tonumber(displayDurationValue) or 0) / TICKS_PER_SECOND
+        end
+        if fadeInSource == "fadeInFrames" then
+            fadeInValue = (tonumber(fadeInValue) or 0) / TICKS_PER_SECOND
+        end
+        if fadeOutSource == "fadeOutFrames" or fadeOutSource == "displayDurationFrames" then
+            fadeOutValue = (tonumber(fadeOutValue) or 0) / TICKS_PER_SECOND
+        end
+
+        normalized.displayEnabled = toBoolean(displayEnabledValue, StatsAPI.DEFAULT_SETTINGS.displayEnabled)
+        normalized.displayOffsetX = toInteger(displayOffsetXValue, StatsAPI.DEFAULT_SETTINGS.displayOffsetX, -200, 200)
+        normalized.displayOffsetY = toInteger(displayOffsetYValue, StatsAPI.DEFAULT_SETTINGS.displayOffsetY, -200, 200)
+        normalized.trackVanillaDisplay = toBoolean(trackVanillaValue, StatsAPI.DEFAULT_SETTINGS.trackVanillaDisplay)
+        normalized.debugEnabled = toBoolean(debugEnabledValue, StatsAPI.DEFAULT_SETTINGS.debugEnabled)
+        normalized.displayMode = normalizeDisplayMode(displayModeValue, StatsAPI.DEFAULT_SETTINGS.displayMode)
+        normalized.tabHoldSeconds = normalizeSeconds(
+            tabHoldValue,
+            StatsAPI.DEFAULT_SETTINGS.tabHoldSeconds,
+            TAB_HOLD_SECONDS_MIN,
+            TAB_HOLD_SECONDS_MAX
+        )
+        normalized.displayDurationSeconds = normalizeSeconds(
+            displayDurationValue,
+            StatsAPI.DEFAULT_SETTINGS.displayDurationSeconds,
+            DISPLAY_DURATION_SECONDS_MIN,
+            DISPLAY_DURATION_SECONDS_MAX
+        )
+        normalized.fadeInSeconds = normalizeSeconds(
+            fadeInValue,
+            StatsAPI.DEFAULT_SETTINGS.fadeInSeconds,
+            FADE_IN_SECONDS_MIN,
+            FADE_IN_SECONDS_MAX
+        )
+        normalized.fadeOutSeconds = normalizeSeconds(
+            fadeOutValue,
+            StatsAPI.DEFAULT_SETTINGS.fadeOutSeconds,
+            FADE_OUT_SECONDS_MIN,
+            FADE_OUT_SECONDS_MAX
+        )
     end
     return normalized
 end
@@ -489,6 +749,142 @@ function StatsAPI:SetDisplayMode(mode)
     end
 
     StatsAPI.print("HUD multiplier display mode: " .. target)
+    self:SaveRunData()
+end
+
+function StatsAPI:GetTabHoldSeconds()
+    if type(self.settings) ~= "table" then
+        self.settings = _normalizeSettings(nil)
+    end
+    local value = normalizeSeconds(
+        self.settings.tabHoldSeconds,
+        DEFAULT_TAB_HOLD_SECONDS,
+        TAB_HOLD_SECONDS_MIN,
+        TAB_HOLD_SECONDS_MAX
+    )
+    if self.settings.tabHoldSeconds ~= value then
+        self.settings.tabHoldSeconds = value
+    end
+    return value
+end
+
+function StatsAPI:SetTabHoldSeconds(seconds)
+    if type(self.settings) ~= "table" then
+        self.settings = _normalizeSettings(nil)
+    end
+    local target = normalizeSeconds(
+        seconds,
+        DEFAULT_TAB_HOLD_SECONDS,
+        TAB_HOLD_SECONDS_MIN,
+        TAB_HOLD_SECONDS_MAX
+    )
+    if self.settings.tabHoldSeconds == target then
+        return
+    end
+    self.settings.tabHoldSeconds = target
+    StatsAPI.print(string.format("HUD tab hold delay: %.2fs", target))
+    self:SaveRunData()
+end
+
+function StatsAPI:GetFadeInSeconds()
+    if type(self.settings) ~= "table" then
+        self.settings = _normalizeSettings(nil)
+    end
+    local value = normalizeSeconds(
+        self.settings.fadeInSeconds,
+        DEFAULT_FADE_IN_SECONDS,
+        FADE_IN_SECONDS_MIN,
+        FADE_IN_SECONDS_MAX
+    )
+    if self.settings.fadeInSeconds ~= value then
+        self.settings.fadeInSeconds = value
+    end
+    return value
+end
+
+function StatsAPI:SetFadeInSeconds(seconds)
+    if type(self.settings) ~= "table" then
+        self.settings = _normalizeSettings(nil)
+    end
+    local target = normalizeSeconds(
+        seconds,
+        DEFAULT_FADE_IN_SECONDS,
+        FADE_IN_SECONDS_MIN,
+        FADE_IN_SECONDS_MAX
+    )
+    if self.settings.fadeInSeconds == target then
+        return
+    end
+    self.settings.fadeInSeconds = target
+    StatsAPI.print(string.format("HUD fade in duration: %.2fs", target))
+    self:SaveRunData()
+end
+
+function StatsAPI:GetFadeOutSeconds()
+    if type(self.settings) ~= "table" then
+        self.settings = _normalizeSettings(nil)
+    end
+    local value = normalizeSeconds(
+        self.settings.fadeOutSeconds,
+        DEFAULT_FADE_OUT_SECONDS,
+        FADE_OUT_SECONDS_MIN,
+        FADE_OUT_SECONDS_MAX
+    )
+    if self.settings.fadeOutSeconds ~= value then
+        self.settings.fadeOutSeconds = value
+    end
+    return value
+end
+
+function StatsAPI:SetFadeOutSeconds(seconds)
+    if type(self.settings) ~= "table" then
+        self.settings = _normalizeSettings(nil)
+    end
+    local target = normalizeSeconds(
+        seconds,
+        DEFAULT_FADE_OUT_SECONDS,
+        FADE_OUT_SECONDS_MIN,
+        FADE_OUT_SECONDS_MAX
+    )
+    if self.settings.fadeOutSeconds == target then
+        return
+    end
+    self.settings.fadeOutSeconds = target
+    StatsAPI.print(string.format("HUD fade out duration: %.2fs", target))
+    self:SaveRunData()
+end
+
+function StatsAPI:GetDisplayDurationSeconds()
+    if type(self.settings) ~= "table" then
+        self.settings = _normalizeSettings(nil)
+    end
+    local value = normalizeSeconds(
+        self.settings.displayDurationSeconds,
+        DEFAULT_DISPLAY_DURATION_SECONDS,
+        DISPLAY_DURATION_SECONDS_MIN,
+        DISPLAY_DURATION_SECONDS_MAX
+    )
+    if self.settings.displayDurationSeconds ~= value then
+        self.settings.displayDurationSeconds = value
+    end
+    return value
+end
+
+function StatsAPI:SetDisplayDurationSeconds(seconds)
+    if type(self.settings) ~= "table" then
+        self.settings = _normalizeSettings(nil)
+    end
+    local target = normalizeSeconds(
+        seconds,
+        DEFAULT_DISPLAY_DURATION_SECONDS,
+        DISPLAY_DURATION_SECONDS_MIN,
+        DISPLAY_DURATION_SECONDS_MAX
+    )
+    if self.settings.displayDurationSeconds == target then
+        return
+    end
+    self.settings.displayDurationSeconds = target
+    StatsAPI.print(string.format("HUD visible duration: %.2fs", target))
     self:SaveRunData()
 end
 
@@ -614,7 +1010,11 @@ function StatsAPI:SetDisplayOffsets(offsetX, offsetY)
         displayOffsetY = offsetY,
         trackVanillaDisplay = self.settings.trackVanillaDisplay,
         debugEnabled = self.settings.debugEnabled,
-        displayMode = self.settings.displayMode
+        displayMode = self.settings.displayMode,
+        tabHoldSeconds = self.settings.tabHoldSeconds,
+        displayDurationSeconds = self.settings.displayDurationSeconds,
+        fadeInSeconds = self.settings.fadeInSeconds,
+        fadeOutSeconds = self.settings.fadeOutSeconds
     })
 
     local changed = false
@@ -704,6 +1104,11 @@ function StatsAPI:SaveRunData()
         runData = self._runData,
         settings = _normalizeSettings(self.settings)
     }
+    local raw = _getRawModData(self.mod)
+    local existing = _decodePersistentObject(raw)
+    if type(existing.runtime) == "table" and next(existing.runtime) ~= nil then
+        payload.runtime = existing.runtime
+    end
     local ok, encoded = pcall(function()
         return json.encode(payload)
     end)
@@ -716,6 +1121,7 @@ function StatsAPI:SaveRunData()
 end
 
 function StatsAPI:LoadRunData()
+    self._runtimePendingNoticeChecked = false
     if not self.mod:HasData() then
         StatsAPI.printDebug("No saved data found")
         self.settings = _normalizeSettings(self.settings)
@@ -736,7 +1142,11 @@ function StatsAPI:LoadRunData()
         if not self._runData.players then
             self._runData.players = {}
         end
-        self.settings = _normalizeSettings(data.settings)
+        local settingsSource = data.settings
+        if type(settingsSource) ~= "table" then
+            settingsSource = data
+        end
+        self.settings = _normalizeSettings(settingsSource)
         self.DEBUG = self.settings.debugEnabled == true
         StatsAPI.printDebug("Run data loaded successfully")
     else
@@ -747,13 +1157,28 @@ function StatsAPI:LoadRunData()
     end
 end
 
-function StatsAPI:ClearRunData()
+function StatsAPI:ClearRunData(skipSave)
     self._runData = { players = {} }
-    self:SaveRunData()
-    StatsAPI.printDebug("Run data cleared (settings preserved)")
+    if not skipSave then
+        self:SaveRunData()
+    end
+    StatsAPI.printDebug("Run data cleared (settings preserved" .. (skipSave and ", not saved yet" or "") .. ")")
+end
+
+function StatsAPI:TryConsumePendingRuntimeNotice()
+    if not self._runtimePendingNoticeChecked then
+        local pendingNotice = _consumePendingRuntimeNotice(self.mod)
+        self._runtimePendingNoticeChecked = true
+        if type(pendingNotice) == "string" and pendingNotice ~= "" then
+            StatsAPI.print("[runtime] " .. pendingNotice)
+            self:ShowRuntimeNotice(pendingNotice, "success")
+        end
+    end
 end
 
 function StatsAPI:PollRuntimeQueue()
+    self:TryConsumePendingRuntimeNotice()
+
     local frame = Isaac.GetFrameCount()
     if (frame - _lastRuntimePollFrame) < RUNTIME_POLL_INTERVAL then
         return
@@ -769,17 +1194,18 @@ function StatsAPI:PollRuntimeQueue()
         if type(entry) == "table" and type(entry.data) == "string" and entry.data ~= "" then
             if entry.type == "msg" then
                 StatsAPI.print("[runtime] " .. entry.data)
-                local kind = "info"
-                local lowered = string.lower(entry.data)
-                if _startsWith(lowered, "reloaded") or _startsWith(lowered, "reload complete") then
-                    kind = "success"
-                elseif _startsWith(lowered, "error") then
-                    kind = "error"
-                end
-                self:ShowRuntimeNotice(entry.data, kind)
+                self:ShowRuntimeNotice(entry.data, "info")
             elseif entry.type == "command" then
                 StatsAPI.print("[runtime] Executing command: " .. entry.data)
-                self:ShowRuntimeNotice("Executing: " .. entry.data, "info")
+                local lowerCmd = string.lower(entry.data)
+                if _startsWith(lowerCmd, "luamod ") then
+                    local target = string.sub(entry.data, 8)
+                    local notice = "Reload complete"
+                    if type(target) == "string" and target ~= "" then
+                        notice = "Reloaded: " .. target
+                    end
+                    _setPendingRuntimeNotice(self.mod, notice)
+                end
                 Isaac.ExecuteCommand(entry.data)
             end
         end
@@ -795,40 +1221,44 @@ mod:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, cmd, args)
     end
 end)
 
-mod:AddCallback(ModCallbacks.MC_POST_UPDATE, function()
-    if StatsAPI and type(StatsAPI.PollRuntimeQueue) == "function" then
-        StatsAPI:PollRuntimeQueue()
+local function _safePollRuntimeQueue()
+    if Isaac.GetFrameCount() < 1 then
+        return
     end
+    if StatsAPI and type(StatsAPI.PollRuntimeQueue) == "function" then
+        local ok, err = pcall(StatsAPI.PollRuntimeQueue, StatsAPI)
+        if not ok then
+            StatsAPI.printError("PollRuntimeQueue failed: " .. tostring(err))
+        end
+    end
+end
+
+mod:AddCallback(ModCallbacks.MC_POST_UPDATE, function()
+    _safePollRuntimeQueue()
 end)
 
 ---------------------------------------------
 -- Load Sub-Modules
 ---------------------------------------------
 
+-- Load persisted run/settings early so MCM and runtime logic start with saved values.
+StatsAPI:LoadRunData()
+
 local function requireFreshModule(modulePath)
     local loadedTable = package and package.loaded
-    local hadPrevious = false
-    local previousValue = nil
-
     if type(loadedTable) == "table" then
-        if loadedTable[modulePath] ~= nil then
-            hadPrevious = true
-            previousValue = loadedTable[modulePath]
-        end
         loadedTable[modulePath] = nil
+
+        -- Some loaders may cache by slash-form path too.
+        local slashPath = string.gsub(modulePath, "%.", "/")
+        loadedTable[slashPath] = nil
+
+        -- Also clear ".lua" suffix variants if present.
+        loadedTable[modulePath .. ".lua"] = nil
+        loadedTable[slashPath .. ".lua"] = nil
     end
 
-    local ok, result = pcall(require, modulePath)
-
-    if type(loadedTable) == "table" then
-        if hadPrevious then
-            loadedTable[modulePath] = previousValue
-        else
-            loadedTable[modulePath] = nil
-        end
-    end
-
-    return ok, result
+    return pcall(require, modulePath)
 end
 
 local function hasStatsLibrary()
@@ -952,6 +1382,7 @@ end
 -- Try once at load time, then retry on game start for load-order-safe setup.
 trySetupMCM()
 mod:AddCallback(ModCallbacks.MC_POST_RENDER, function()
+    _safePollRuntimeQueue()
     if not _mcmSetupDone then
         trySetupMCM()
     end
@@ -962,6 +1393,9 @@ end)
 mod:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
     if not _mcmSetupDone then
         trySetupMCM()
+    end
+    if StatsAPI and type(StatsAPI.TryConsumePendingRuntimeNotice) == "function" then
+        StatsAPI:TryConsumePendingRuntimeNotice()
     end
 end)
 

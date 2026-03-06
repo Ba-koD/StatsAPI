@@ -892,13 +892,24 @@ StatsAPI.printDebug("Using Isaac default font for multiplier display")
 local ButtonAction_ACTION_MAP = ButtonAction.ACTION_MAP
 
 -- Display settings
-local MULTIPLIER_DISPLAY_DURATION = 150
+local TICKS_PER_SECOND = 30
+local TAB_HOLD_SECONDS_MIN = 0
+local TAB_HOLD_SECONDS_MAX = 10
+local DISPLAY_DURATION_SECONDS_MIN = 0
+local DISPLAY_DURATION_SECONDS_MAX = 30
+local FADE_IN_SECONDS_MIN = 0
+local FADE_IN_SECONDS_MAX = 10
+local FADE_OUT_SECONDS_MIN = 0
+local FADE_OUT_SECONDS_MAX = 10
+local DEFAULT_TAB_HOLD_SECONDS = 0
+local DEFAULT_DISPLAY_DURATION_SECONDS = 5
+local DEFAULT_FADE_IN_SECONDS = 0.2
+local DEFAULT_FADE_OUT_SECONDS = 0.6
+local DEFAULT_MULTIPLIER_DISPLAY_DURATION = math.floor((DEFAULT_DISPLAY_DURATION_SECONDS * TICKS_PER_SECOND) + 0.5)
+local MULTIPLIER_DISPLAY_DURATION = DEFAULT_MULTIPLIER_DISPLAY_DURATION
 local MULTIPLIER_MOVEMENT_DURATION = 10
 local MULTIPLIER_FADING_DURATION = 40
-
--- Tab button display settings
-local TAB_DISPLAY_DURATION = 10
-local TAB_DISPLAY_FADE_DURATION = 20
+local TAB_DISPLAY_MAX_ALPHA = 0.8
 
 -- HUD base positions matched to Stats Plus behavior.
 local SINGLE_PLAYER_STAT_POSITIONS = {
@@ -947,6 +958,11 @@ function StatsAPI.stats.multiplierDisplay:InitPlayer(player)
             displayStartFrame = 0,
             isDisplaying = false,
             tabDisplayStartFrame = 0,
+            tabPressStartFrame = nil,
+            tabFadeInStartFrame = nil,
+            tabFadeOutStartFrame = nil,
+            tabFadeOutStartAlpha = nil,
+            tabAlpha = 0,
             isTabDisplaying = false,
             lastDebugState = nil,
             lastDisplayLogicState = nil,
@@ -1170,28 +1186,23 @@ local function ToFixedFormatted(value, digits)
     return text
 end
 
+local statReaderByType = {
+    Speed = function(p) return math.min(2, p.MoveSpeed) end,
+    Tears = function(p) return 30 / (p.MaxFireDelay + 1) end,
+    Damage = function(p) return p.Damage end,
+    Range = function(p) return p.TearRange / 40 end,
+    ShotSpeed = function(p) return p.ShotSpeed end,
+    Luck = function(p) return p.Luck end
+}
+
 local function GetDisplayedStatValue(player, statType)
     if not player or not statType then
         return nil
     end
 
-    if statType == "Speed" then
-        return math.min(2, player.MoveSpeed)
-    end
-    if statType == "Tears" then
-        return 30 / (player.MaxFireDelay + 1)
-    end
-    if statType == "Damage" then
-        return player.Damage
-    end
-    if statType == "Range" then
-        return player.TearRange / 40
-    end
-    if statType == "ShotSpeed" then
-        return player.ShotSpeed
-    end
-    if statType == "Luck" then
-        return player.Luck
+    local reader = statReaderByType[statType]
+    if type(reader) == "function" then
+        return reader(player)
     end
 
     return nil
@@ -1418,6 +1429,12 @@ local function GetLiveDisplayTotalMultiplier(player, statType, fallbackTotal)
     return baseTotal * vanillaDisplayMultiplier
 end
 
+local function IsRenderableCurrentData(current, currentType)
+    return type(current) == "number"
+        and type(currentType) == "string"
+        and currentType ~= "addition"
+end
+
 local function GetLiveDisplayCurrent(player, statType, fallbackCurrent, fallbackType)
     local statEntry = GetUnifiedStatEntry(player, statType)
     if type(statEntry) == "table" then
@@ -1431,42 +1448,38 @@ local function GetLiveDisplayCurrent(player, statType, fallbackCurrent, fallback
 
         local current = statEntry.displayCurrent
         local currentType = statEntry.displayType
-        if type(current) == "number"
-            and type(currentType) == "string"
-            and currentType ~= "addition" then
+        if IsRenderableCurrentData(current, currentType) then
             return current, currentType
         end
 
         current = statEntry.current
         currentType = statEntry.currentType
-        if type(current) == "number"
-            and type(currentType) == "string"
-            and currentType ~= "addition" then
+        if IsRenderableCurrentData(current, currentType) then
             return current, currentType
         end
     end
     return fallbackCurrent, fallbackType
 end
 
+local HUD_DISPLAY_MODE_BY_ALIAS = {
+    last = "last",
+    current = "last",
+    recent = "last",
+    last_multiplier = "last",
+    final = "final",
+    total = "final",
+    final_multiplier = "final",
+    total_multiplier = "final",
+    both = "both",
+    all = "both"
+}
+
 local function NormalizeHUDDisplayMode(mode)
     if type(mode) ~= "string" then
         return "both"
     end
     local lowered = string.lower(mode)
-    if lowered == "last"
-        or lowered == "current"
-        or lowered == "recent"
-        or lowered == "last_multiplier" then
-        return "last"
-    elseif lowered == "final"
-        or lowered == "total"
-        or lowered == "final_multiplier"
-        or lowered == "total_multiplier" then
-        return "final"
-    elseif lowered == "both" or lowered == "all" then
-        return "both"
-    end
-    return "both"
+    return HUD_DISPLAY_MODE_BY_ALIAS[lowered] or "both"
 end
 
 local function GetHUDDisplayMode()
@@ -1477,6 +1490,88 @@ local function GetHUDDisplayMode()
         return NormalizeHUDDisplayMode(StatsAPI.settings.displayMode)
     end
     return "both"
+end
+
+local function NormalizeSeconds(value, defaultValue, minValue, maxValue)
+    local num = nil
+    if type(value) == "number" then
+        num = value
+    elseif type(value) == "string" then
+        num = tonumber(value)
+    end
+    if type(num) ~= "number" then
+        num = defaultValue
+    end
+    if num < minValue then
+        num = minValue
+    elseif num > maxValue then
+        num = maxValue
+    end
+    return num
+end
+
+local function GetHUDTimingFrames()
+    local holdSeconds = DEFAULT_TAB_HOLD_SECONDS
+    local displaySeconds = DEFAULT_DISPLAY_DURATION_SECONDS
+    local fadeInSeconds = DEFAULT_FADE_IN_SECONDS
+    local fadeOutSeconds = DEFAULT_FADE_OUT_SECONDS
+
+    if StatsAPI then
+        if type(StatsAPI.GetTabHoldSeconds) == "function" then
+            holdSeconds = StatsAPI:GetTabHoldSeconds()
+        elseif type(StatsAPI.settings) == "table" then
+            holdSeconds = StatsAPI.settings.tabHoldSeconds
+        end
+
+        if type(StatsAPI.GetDisplayDurationSeconds) == "function" then
+            displaySeconds = StatsAPI:GetDisplayDurationSeconds()
+        elseif type(StatsAPI.settings) == "table" then
+            displaySeconds = StatsAPI.settings.displayDurationSeconds
+        end
+
+        if type(StatsAPI.GetFadeInSeconds) == "function" then
+            fadeInSeconds = StatsAPI:GetFadeInSeconds()
+        elseif type(StatsAPI.settings) == "table" then
+            fadeInSeconds = StatsAPI.settings.fadeInSeconds
+        end
+
+        if type(StatsAPI.GetFadeOutSeconds) == "function" then
+            fadeOutSeconds = StatsAPI:GetFadeOutSeconds()
+        elseif type(StatsAPI.settings) == "table" then
+            fadeOutSeconds = StatsAPI.settings.fadeOutSeconds
+        end
+    end
+
+    holdSeconds = NormalizeSeconds(
+        holdSeconds,
+        DEFAULT_TAB_HOLD_SECONDS,
+        TAB_HOLD_SECONDS_MIN,
+        TAB_HOLD_SECONDS_MAX
+    )
+    displaySeconds = NormalizeSeconds(
+        displaySeconds,
+        DEFAULT_DISPLAY_DURATION_SECONDS,
+        DISPLAY_DURATION_SECONDS_MIN,
+        DISPLAY_DURATION_SECONDS_MAX
+    )
+    fadeInSeconds = NormalizeSeconds(
+        fadeInSeconds,
+        DEFAULT_FADE_IN_SECONDS,
+        FADE_IN_SECONDS_MIN,
+        FADE_IN_SECONDS_MAX
+    )
+    fadeOutSeconds = NormalizeSeconds(
+        fadeOutSeconds,
+        DEFAULT_FADE_OUT_SECONDS,
+        FADE_OUT_SECONDS_MIN,
+        FADE_OUT_SECONDS_MAX
+    )
+
+    local holdFrames = math.max(0, math.floor((holdSeconds * TICKS_PER_SECOND) + 0.5))
+    local displayFrames = math.max(1, math.floor((displaySeconds * TICKS_PER_SECOND) + 0.5))
+    local fadeInFrames = math.max(0, math.floor((fadeInSeconds * TICKS_PER_SECOND) + 0.5))
+    local fadeOutFrames = math.max(0, math.floor((fadeOutSeconds * TICKS_PER_SECOND) + 0.5))
+    return holdFrames, displayFrames, fadeInFrames, fadeOutFrames
 end
 
 -- Render a single multiplier stat
@@ -1597,37 +1692,111 @@ function StatsAPI.stats.multiplierDisplay:RenderPlayer(player, renderIndex, hasB
     local shouldDisplay = false
     local displayType = "none"
     local currentFrame = Game():GetFrameCount()
+    local tabHoldFramesRequired, normalDisplayDurationFrames, tabFadeInFrames, tabFadeOutFrames = GetHUDTimingFrames()
 
     local isTabPressed = Input.IsActionPressed(ButtonAction_ACTION_MAP, player.ControllerIndex or 0)
-
+    local heldFrames = 0
     if isTabPressed then
+        if data.tabPressStartFrame == nil then
+            data.tabPressStartFrame = currentFrame
+        end
+        heldFrames = currentFrame - data.tabPressStartFrame
+    else
+        data.tabPressStartFrame = nil
+    end
+    local holdSatisfied = isTabPressed and heldFrames >= tabHoldFramesRequired
+
+    if holdSatisfied then
         if not data.isTabDisplaying then
             data.isTabDisplaying = true
-            data.tabDisplayStartFrame = currentFrame
+            data.tabFadeInStartFrame = currentFrame
+            data.tabAlpha = 0
+        elseif data.tabFadeOutStartFrame ~= nil then
+            local currentAlpha = tonumber(data.tabAlpha) or 0
+            data.tabFadeInStartFrame = currentFrame
+            if tabFadeInFrames > 0 and currentAlpha > 0 and currentAlpha < TAB_DISPLAY_MAX_ALPHA then
+                local progress = currentAlpha / TAB_DISPLAY_MAX_ALPHA
+                data.tabFadeInStartFrame = currentFrame - math.floor((progress * tabFadeInFrames) + 0.5)
+            end
+        elseif data.tabFadeInStartFrame == nil then
+            data.tabFadeInStartFrame = currentFrame
         end
+        data.tabFadeOutStartFrame = nil
+        data.tabFadeOutStartAlpha = nil
+    elseif not isTabPressed and data.isTabDisplaying and data.tabFadeOutStartFrame == nil then
+        data.tabFadeOutStartFrame = currentFrame
+        local startAlpha = tonumber(data.tabAlpha)
+        if type(startAlpha) ~= "number" then
+            startAlpha = TAB_DISPLAY_MAX_ALPHA
+        end
+        if startAlpha < 0 then
+            startAlpha = 0
+        end
+        if startAlpha > TAB_DISPLAY_MAX_ALPHA then
+            startAlpha = TAB_DISPLAY_MAX_ALPHA
+        end
+        data.tabFadeOutStartAlpha = startAlpha
+        data.tabFadeInStartFrame = nil
+    end
+
+    local tabAlpha = 0
+    if data.isTabDisplaying then
+        if holdSatisfied then
+            if tabFadeInFrames <= 0 then
+                tabAlpha = TAB_DISPLAY_MAX_ALPHA
+            else
+                local fadeInStart = data.tabFadeInStartFrame or currentFrame
+                local fadeInPercent = (currentFrame - fadeInStart) / tabFadeInFrames
+                if fadeInPercent < 0 then
+                    fadeInPercent = 0
+                elseif fadeInPercent > 1 then
+                    fadeInPercent = 1
+                end
+                tabAlpha = TAB_DISPLAY_MAX_ALPHA * fadeInPercent
+            end
+        elseif data.tabFadeOutStartFrame ~= nil then
+            local fadeOutStartAlpha = tonumber(data.tabFadeOutStartAlpha) or TAB_DISPLAY_MAX_ALPHA
+            if tabFadeOutFrames <= 0 then
+                tabAlpha = 0
+            else
+                local fadeOutElapsed = currentFrame - data.tabFadeOutStartFrame
+                local fadeOutPercent = 1 - (fadeOutElapsed / tabFadeOutFrames)
+                if fadeOutPercent < 0 then
+                    fadeOutPercent = 0
+                elseif fadeOutPercent > 1 then
+                    fadeOutPercent = 1
+                end
+                tabAlpha = fadeOutStartAlpha * fadeOutPercent
+            end
+        else
+            tabAlpha = TAB_DISPLAY_MAX_ALPHA
+        end
+    end
+
+    if tabAlpha > 0 then
+        data.tabAlpha = tabAlpha
         shouldDisplay = true
-        displayType = "tab"
-    else
-        if data.isTabDisplaying then
-            local tabDuration = currentFrame - data.tabDisplayStartFrame
-            local totalTabDuration = TAB_DISPLAY_DURATION + TAB_DISPLAY_FADE_DURATION
-
-            if tabDuration < totalTabDuration then
-                shouldDisplay = true
-                displayType = "tab_fade"
-            else
-                data.isTabDisplaying = false
-            end
+        displayType = holdSatisfied and "tab" or "tab_fade"
+        if data.isDisplaying then
+            data.isDisplaying = false
         end
+    else
+        data.tabAlpha = 0
+        if data.tabFadeOutStartFrame ~= nil then
+            data.isTabDisplaying = false
+            data.tabFadeOutStartFrame = nil
+            data.tabFadeOutStartAlpha = nil
+            data.tabFadeInStartFrame = nil
+        end
+    end
 
-        if not shouldDisplay and data.isDisplaying then
-            local duration = currentFrame - data.displayStartFrame
-            if duration < MULTIPLIER_DISPLAY_DURATION then
-                shouldDisplay = true
-                displayType = "normal"
-            else
-                data.isDisplaying = false
-            end
+    if not shouldDisplay and not isTabPressed and data.isDisplaying then
+        local duration = currentFrame - data.displayStartFrame
+        if duration < normalDisplayDurationFrames then
+            shouldDisplay = true
+            displayType = "normal"
+        else
+            data.isDisplaying = false
         end
     end
 
@@ -1641,34 +1810,25 @@ function StatsAPI.stats.multiplierDisplay:RenderPlayer(player, renderIndex, hasB
 
     local alpha = 0.5
 
-    if displayType == "tab" then
-        alpha = 0.8
-    elseif displayType == "tab_fade" then
-        local tabDuration = currentFrame - data.tabDisplayStartFrame
-        local fadeStart = TAB_DISPLAY_DURATION
-        local fadeEnd = fadeStart + TAB_DISPLAY_FADE_DURATION
-
-        if tabDuration <= fadeStart then
-            alpha = 0.8
-        elseif tabDuration <= fadeEnd then
-            local fadePercent = (fadeEnd - tabDuration) / TAB_DISPLAY_FADE_DURATION
-            alpha = 0.8 * fadePercent
-        else
+    if displayType == "tab" or displayType == "tab_fade" then
+        alpha = tonumber(data.tabAlpha) or 0
+        if alpha < 0 then
             alpha = 0
-        end
-
-        if data.isDisplaying then
-            data.isDisplaying = false
+        elseif alpha > TAB_DISPLAY_MAX_ALPHA then
+            alpha = TAB_DISPLAY_MAX_ALPHA
         end
     else
         local duration = currentFrame - data.displayStartFrame
-        if duration <= MULTIPLIER_MOVEMENT_DURATION then
-            local percent = duration / MULTIPLIER_MOVEMENT_DURATION
+        local movementDuration = math.max(1, math.min(MULTIPLIER_MOVEMENT_DURATION, normalDisplayDurationFrames))
+        local fadingDuration = math.max(1, math.min(MULTIPLIER_FADING_DURATION, normalDisplayDurationFrames))
+
+        if duration <= movementDuration then
+            local percent = duration / movementDuration
             alpha = 0 + (0.5 - 0) * percent
         end
 
-        if MULTIPLIER_DISPLAY_DURATION - duration <= MULTIPLIER_FADING_DURATION then
-            local percent = (MULTIPLIER_DISPLAY_DURATION - duration) / MULTIPLIER_FADING_DURATION
+        if normalDisplayDurationFrames - duration <= fadingDuration then
+            local percent = (normalDisplayDurationFrames - duration) / fadingDuration
             alpha = 0 + (0.5 - 0) * percent
         end
     end
@@ -1686,8 +1846,9 @@ function StatsAPI.stats.multiplierDisplay:RenderPlayer(player, renderIndex, hasB
     local animationOffset = 0
     if displayType == "normal" then
         local duration = currentFrame - data.displayStartFrame
-        if duration <= MULTIPLIER_MOVEMENT_DURATION then
-            local percent = duration / MULTIPLIER_MOVEMENT_DURATION
+        local movementDuration = math.max(1, math.min(MULTIPLIER_MOVEMENT_DURATION, normalDisplayDurationFrames))
+        if duration <= movementDuration then
+            local percent = duration / movementDuration
             local movementPercent = math.sin((percent * math.pi) / 2)
             animationOffset = 20 + (0 - 20) * movementPercent
         end
@@ -1746,17 +1907,26 @@ end
 
 -- Initialize the display system (registers render callback)
 function StatsAPI.stats.multiplierDisplay:Initialize()
-    if not self.initialized then
-        self.initialized = true
-        StatsAPI.printDebug("Multiplier display system initialized!")
-
-        StatsAPI.mod:AddCallback(ModCallbacks.MC_POST_RENDER, function()
-            if StatsAPI.stats and StatsAPI.stats.multiplierDisplay then
-                StatsAPI.stats.multiplierDisplay:Render()
-            end
-        end)
-        StatsAPI.print("Render callback registered!")
+    local modRef = StatsAPI and StatsAPI.mod or nil
+    if modRef == nil then
+        return
     end
+
+    -- Re-register render callback when luamod creates a new mod instance.
+    if self._renderCallbackOwner == modRef then
+        return
+    end
+
+    self.initialized = true
+    self._renderCallbackOwner = modRef
+    StatsAPI.printDebug("Multiplier display system initialized!")
+
+    modRef:AddCallback(ModCallbacks.MC_POST_RENDER, function()
+        if StatsAPI.stats and StatsAPI.stats.multiplierDisplay then
+            StatsAPI.stats.multiplierDisplay:Render()
+        end
+    end)
+    StatsAPI.print("Render callback registered!")
 end
 
 -- Reset all multiplier data for a new game
@@ -1777,7 +1947,8 @@ function StatsAPI.stats.multiplierDisplay:ForceShow(player, duration)
     self.playerData[playerID].displayStartFrame = Game():GetFrameCount()
     self.playerData[playerID].isDisplaying = true
 
-    StatsAPI.printDebug("Force showing multiplier display for " .. (duration or MULTIPLIER_DISPLAY_DURATION) .. " frames")
+    local _, defaultDurationFrames = GetHUDTimingFrames()
+    StatsAPI.printDebug("Force showing multiplier display for " .. (duration or defaultDurationFrames) .. " frames")
 end
 
 -- Legacy functions for backward compatibility (deprecated)
@@ -2415,45 +2586,55 @@ function StatsAPI.stats.unified.updateCache(player, cacheFlag)
     player:EvaluateItems()
 end
 
+local statModuleByType = {
+    damage = StatsAPI.stats.damage,
+    tears = StatsAPI.stats.tears,
+    speed = StatsAPI.stats.speed,
+    range = StatsAPI.stats.range,
+    luck = StatsAPI.stats.luck,
+    shotSpeed = StatsAPI.stats.shotSpeed
+}
+
+local methodByOperation = {
+    multiplier = "applyMultiplier",
+    addition = "applyAddition"
+}
+
+local function GetStatApplier(statType, operationType)
+    if type(statType) ~= "string" or type(operationType) ~= "string" then
+        return nil
+    end
+
+    local module = statModuleByType[statType]
+    local methodName = methodByOperation[operationType]
+    if type(module) ~= "table" or type(methodName) ~= "string" then
+        return nil
+    end
+
+    local method = module[methodName]
+    if type(method) ~= "function" then
+        return nil
+    end
+    return method
+end
+
 -- Convenience functions
 StatsAPI.stats.applyToAll = function(player, statType, multiplier, minValue, showDisplay)
     if not player or not statType then return false end
-
-    if statType == "damage" then
-        return StatsAPI.stats.damage.applyMultiplier(player, multiplier, minValue, showDisplay)
-    elseif statType == "tears" then
-        return StatsAPI.stats.tears.applyMultiplier(player, multiplier, minValue, showDisplay)
-    elseif statType == "speed" then
-        return StatsAPI.stats.speed.applyMultiplier(player, multiplier, minValue, showDisplay)
-    elseif statType == "range" then
-        return StatsAPI.stats.range.applyMultiplier(player, multiplier, minValue, showDisplay)
-    elseif statType == "luck" then
-        return StatsAPI.stats.luck.applyMultiplier(player, multiplier, minValue, showDisplay)
-    elseif statType == "shotSpeed" then
-        return StatsAPI.stats.shotSpeed.applyMultiplier(player, multiplier, minValue, showDisplay)
+    local applyMultiplier = GetStatApplier(statType, "multiplier")
+    if type(applyMultiplier) ~= "function" then
+        return false
     end
-
-    return false
+    return applyMultiplier(player, multiplier, minValue, showDisplay)
 end
 
 StatsAPI.stats.addToAll = function(player, statType, addition, minValue)
     if not player or not statType then return false end
-
-    if statType == "damage" then
-        return StatsAPI.stats.damage.applyAddition(player, addition, minValue)
-    elseif statType == "tears" then
-        return StatsAPI.stats.tears.applyAddition(player, addition, minValue)
-    elseif statType == "speed" then
-        return StatsAPI.stats.speed.applyAddition(player, addition, minValue)
-    elseif statType == "range" then
-        return StatsAPI.stats.range.applyAddition(player, addition, minValue)
-    elseif statType == "luck" then
-        return StatsAPI.stats.luck.applyAddition(player, addition, minValue)
-    elseif statType == "shotSpeed" then
-        return StatsAPI.stats.shotSpeed.applyAddition(player, addition, minValue)
+    local applyAddition = GetStatApplier(statType, "addition")
+    if type(applyAddition) ~= "function" then
+        return false
     end
-
-    return false
+    return applyAddition(player, addition, minValue)
 end
 
 StatsAPI.stats.getCurrentStats = function(player)
@@ -2473,13 +2654,8 @@ StatsAPI.stats.getBaseStats = function()
     return StatsAPI.stats.BASE_STATS
 end
 
--- Apply stat multiplier to actual player stat
-function StatsAPI.stats.unifiedMultipliers:ApplyStatMultiplier(player, statType, totalMultiplier)
-    if not player or not statType or not totalMultiplier then return end
-
-    StatsAPI.printDebug(string.format("Applying %s multiplier %.2fx to player", statType, totalMultiplier))
-
-    local originalValues = {
+local function BuildPlayerStatSnapshot(player)
+    return {
         Tears = player.MaxFireDelay,
         Damage = player.Damage,
         Range = player.TearRange,
@@ -2487,6 +2663,15 @@ function StatsAPI.stats.unifiedMultipliers:ApplyStatMultiplier(player, statType,
         Speed = player.MoveSpeed,
         ShotSpeed = player.ShotSpeed
     }
+end
+
+-- Apply stat multiplier to actual player stat
+function StatsAPI.stats.unifiedMultipliers:ApplyStatMultiplier(player, statType, totalMultiplier)
+    if not player or not statType or not totalMultiplier then return end
+
+    StatsAPI.printDebug(string.format("Applying %s multiplier %.2fx to player", statType, totalMultiplier))
+
+    local originalValues = BuildPlayerStatSnapshot(player)
 
     StatsAPI.printDebug(string.format("Original values - Tears: %.2f, Damage: %.2f, Range: %.2f, Luck: %.2f, Speed: %.2f, ShotSpeed: %.2f",
         originalValues.Tears, originalValues.Damage, originalValues.Range, originalValues.Luck, originalValues.Speed, originalValues.ShotSpeed))
@@ -2508,14 +2693,7 @@ function StatsAPI.stats.unifiedMultipliers:ApplyStatMultiplier(player, statType,
     player:AddCacheFlags(CacheFlag.CACHE_ALL)
     player:EvaluateItems()
 
-    local newValues = {
-        Tears = player.MaxFireDelay,
-        Damage = player.Damage,
-        Range = player.TearRange,
-        Luck = player.Luck,
-        Speed = player.MoveSpeed,
-        ShotSpeed = player.ShotSpeed
-    }
+    local newValues = BuildPlayerStatSnapshot(player)
 
     StatsAPI.printDebug(string.format("New values - Tears: %.2f, Damage: %.2f, Range: %.2f, Luck: %.2f, Speed: %.2f, ShotSpeed: %.2f",
         newValues.Tears, newValues.Damage, newValues.Range, newValues.Luck, newValues.Speed, newValues.ShotSpeed))
@@ -2629,7 +2807,8 @@ do
     StatsAPI.mod:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function(_, isContinued)
         if not isContinued then
             -- New run: clear all data
-            StatsAPI:ClearRunData()
+            -- Keep persisted settings intact; save happens naturally on later updates/exit.
+            StatsAPI:ClearRunData(true)
             if StatsAPI.stats.multiplierDisplay then
                 StatsAPI.stats.multiplierDisplay:ResetForNewGame()
             end
@@ -2689,12 +2868,27 @@ do
                 local playerID = StatsAPI:GetPlayerInstanceKey(player)
                 if um[playerID] and um[playerID].pendingCache then
                     local combined = 0
+                    local hadPending = false
                     for flag, pending in pairs(um[playerID].pendingCache) do
                         if pending then
-                            combined = combined | flag
+                            hadPending = true
+                            if type(flag) == "number" then
+                                -- Cache flags are bit values; summing unique flags is equivalent to bitwise OR.
+                                combined = combined + flag
+                            else
+                                combined = CacheFlag.CACHE_ALL
+                            end
                         end
                     end
+                    if hadPending and combined == 0 then
+                        combined = CacheFlag.CACHE_ALL
+                    end
                     if combined ~= 0 then
+                        StatsAPI.printDebug(string.format(
+                            "[Unified] Flushing pending cache for %s (mask %d)",
+                            tostring(playerID),
+                            combined
+                        ))
                         player:AddCacheFlags(combined)
                         player:EvaluateItems()
                         if um._justLoaded then

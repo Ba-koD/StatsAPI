@@ -26,6 +26,36 @@ local DISPLAY_MODE_SCROLL_VALUE_BY_MODE = {
     [DISPLAY_MODE_FINAL] = 5,
     [DISPLAY_MODE_BOTH] = 10
 }
+local TAB_HOLD_SECONDS_MIN = 0
+local TAB_HOLD_SECONDS_MAX = 10
+local DISPLAY_DURATION_SECONDS_MIN = 0
+local DISPLAY_DURATION_SECONDS_MAX = 30
+local FADE_IN_SECONDS_MIN = 0
+local FADE_IN_SECONDS_MAX = 10
+local FADE_OUT_SECONDS_MIN = 0
+local FADE_OUT_SECONDS_MAX = 10
+local DEFAULT_TAB_HOLD_SECONDS = 0
+local DEFAULT_DISPLAY_DURATION_SECONDS = 5
+local DEFAULT_FADE_IN_SECONDS = 0.2
+local DEFAULT_FADE_OUT_SECONDS = 0.6
+
+local function getDefaultSettings()
+    if StatsAPI and type(StatsAPI.DEFAULT_SETTINGS) == "table" then
+        return StatsAPI.DEFAULT_SETTINGS
+    end
+    return {
+        displayEnabled = true,
+        displayOffsetX = 0,
+        displayOffsetY = 0,
+        trackVanillaDisplay = true,
+        debugEnabled = false,
+        displayMode = DISPLAY_MODE_BOTH,
+        tabHoldSeconds = DEFAULT_TAB_HOLD_SECONDS,
+        displayDurationSeconds = DEFAULT_DISPLAY_DURATION_SECONDS,
+        fadeInSeconds = DEFAULT_FADE_IN_SECONDS,
+        fadeOutSeconds = DEFAULT_FADE_OUT_SECONDS
+    }
+end
 
 local function clampOffset(value)
     local num = tonumber(value) or 0
@@ -40,6 +70,19 @@ local function clampOffset(value)
         num = OFFSET_MAX
     end
     return num
+end
+
+local function clampSeconds(value, minValue, maxValue, defaultValue)
+    local num = tonumber(value)
+    if type(num) ~= "number" then
+        num = defaultValue
+    end
+    if num < minValue then
+        num = minValue
+    elseif num > maxValue then
+        num = maxValue
+    end
+    return math.floor((num * 10) + 0.5) / 10
 end
 
 local function normalizeDisplayMode(value)
@@ -95,23 +138,14 @@ local function ensureSettingsTable()
     if not StatsAPI then
         return nil
     end
+    local defaults = getDefaultSettings()
     if type(StatsAPI.settings) ~= "table" then
-        StatsAPI.settings = {
-            displayEnabled = true,
-            displayOffsetX = 0,
-            displayOffsetY = 0,
-            trackVanillaDisplay = true,
-            debugEnabled = false,
-            displayMode = DISPLAY_MODE_BOTH
-        }
-    elseif StatsAPI.settings.trackVanillaDisplay == nil then
-        StatsAPI.settings.trackVanillaDisplay = true
+        StatsAPI.settings = {}
     end
-    if StatsAPI.settings.debugEnabled == nil then
-        StatsAPI.settings.debugEnabled = false
-    end
-    if StatsAPI.settings.displayMode == nil then
-        StatsAPI.settings.displayMode = DISPLAY_MODE_BOTH
+    for key, defaultValue in pairs(defaults) do
+        if StatsAPI.settings[key] == nil then
+            StatsAPI.settings[key] = defaultValue
+        end
     end
     return StatsAPI.settings
 end
@@ -140,15 +174,20 @@ local function resetDisplayDefaults()
         return
     end
 
+    local defaults = getDefaultSettings()
     local previousTrackVanilla = settings.trackVanillaDisplay
     local previousDebugEnabled = settings.debugEnabled == true
     local previousDisplayMode = normalizeDisplayMode(settings.displayMode)
-    settings.displayEnabled = true
-    settings.displayOffsetX = 0
-    settings.displayOffsetY = 0
-    settings.trackVanillaDisplay = true
-    settings.debugEnabled = false
-    settings.displayMode = DISPLAY_MODE_BOTH
+    settings.displayEnabled = defaults.displayEnabled
+    settings.displayOffsetX = defaults.displayOffsetX
+    settings.displayOffsetY = defaults.displayOffsetY
+    settings.trackVanillaDisplay = defaults.trackVanillaDisplay
+    settings.debugEnabled = defaults.debugEnabled
+    settings.displayMode = defaults.displayMode
+    settings.tabHoldSeconds = defaults.tabHoldSeconds
+    settings.displayDurationSeconds = defaults.displayDurationSeconds
+    settings.fadeInSeconds = defaults.fadeInSeconds
+    settings.fadeOutSeconds = defaults.fadeOutSeconds
 
     if previousTrackVanilla ~= true
         and StatsAPI
@@ -259,6 +298,90 @@ local function getDisplayModeScrollValue()
     return DISPLAY_MODE_SCROLL_VALUE_BY_MODE[mode] or DISPLAY_MODE_SCROLL_VALUE_BY_MODE[DISPLAY_MODE_BOTH]
 end
 
+local function getTabHoldSeconds()
+    if StatsAPI and type(StatsAPI.GetTabHoldSeconds) == "function" then
+        return clampSeconds(
+            StatsAPI:GetTabHoldSeconds(),
+            TAB_HOLD_SECONDS_MIN,
+            TAB_HOLD_SECONDS_MAX,
+            DEFAULT_TAB_HOLD_SECONDS
+        )
+    end
+    local settings = ensureSettingsTable()
+    if settings then
+        return clampSeconds(
+            settings.tabHoldSeconds,
+            TAB_HOLD_SECONDS_MIN,
+            TAB_HOLD_SECONDS_MAX,
+            DEFAULT_TAB_HOLD_SECONDS
+        )
+    end
+    return DEFAULT_TAB_HOLD_SECONDS
+end
+
+local function getDisplayDurationSeconds()
+    if StatsAPI and type(StatsAPI.GetDisplayDurationSeconds) == "function" then
+        return clampSeconds(
+            StatsAPI:GetDisplayDurationSeconds(),
+            DISPLAY_DURATION_SECONDS_MIN,
+            DISPLAY_DURATION_SECONDS_MAX,
+            DEFAULT_DISPLAY_DURATION_SECONDS
+        )
+    end
+    local settings = ensureSettingsTable()
+    if settings then
+        return clampSeconds(
+            settings.displayDurationSeconds,
+            DISPLAY_DURATION_SECONDS_MIN,
+            DISPLAY_DURATION_SECONDS_MAX,
+            DEFAULT_DISPLAY_DURATION_SECONDS
+        )
+    end
+    return DEFAULT_DISPLAY_DURATION_SECONDS
+end
+
+local function getFadeInSeconds()
+    if StatsAPI and type(StatsAPI.GetFadeInSeconds) == "function" then
+        return clampSeconds(
+            StatsAPI:GetFadeInSeconds(),
+            FADE_IN_SECONDS_MIN,
+            FADE_IN_SECONDS_MAX,
+            DEFAULT_FADE_IN_SECONDS
+        )
+    end
+    local settings = ensureSettingsTable()
+    if settings then
+        return clampSeconds(
+            settings.fadeInSeconds,
+            FADE_IN_SECONDS_MIN,
+            FADE_IN_SECONDS_MAX,
+            DEFAULT_FADE_IN_SECONDS
+        )
+    end
+    return DEFAULT_FADE_IN_SECONDS
+end
+
+local function getFadeOutSeconds()
+    if StatsAPI and type(StatsAPI.GetFadeOutSeconds) == "function" then
+        return clampSeconds(
+            StatsAPI:GetFadeOutSeconds(),
+            FADE_OUT_SECONDS_MIN,
+            FADE_OUT_SECONDS_MAX,
+            DEFAULT_FADE_OUT_SECONDS
+        )
+    end
+    local settings = ensureSettingsTable()
+    if settings then
+        return clampSeconds(
+            settings.fadeOutSeconds,
+            FADE_OUT_SECONDS_MIN,
+            FADE_OUT_SECONDS_MAX,
+            DEFAULT_FADE_OUT_SECONDS
+        )
+    end
+    return DEFAULT_FADE_OUT_SECONDS
+end
+
 local function setDisplayMode(value)
     local mode = normalizeDisplayMode(value)
     if StatsAPI and type(StatsAPI.SetDisplayMode) == "function" then
@@ -283,6 +406,135 @@ local function setDisplayMode(value)
     if StatsAPI and type(StatsAPI.SaveRunData) == "function" then
         StatsAPI:SaveRunData()
     end
+end
+
+local function setTabHoldSeconds(value)
+    local seconds = clampSeconds(
+        value,
+        TAB_HOLD_SECONDS_MIN,
+        TAB_HOLD_SECONDS_MAX,
+        DEFAULT_TAB_HOLD_SECONDS
+    )
+    if StatsAPI and type(StatsAPI.SetTabHoldSeconds) == "function" then
+        StatsAPI:SetTabHoldSeconds(seconds)
+        return
+    end
+
+    local settings = ensureSettingsTable()
+    if not settings then
+        return
+    end
+    if settings.tabHoldSeconds == seconds then
+        return
+    end
+    settings.tabHoldSeconds = seconds
+    if StatsAPI and type(StatsAPI.SaveRunData) == "function" then
+        StatsAPI:SaveRunData()
+    end
+end
+
+local function setDisplayDurationSeconds(value)
+    local seconds = clampSeconds(
+        value,
+        DISPLAY_DURATION_SECONDS_MIN,
+        DISPLAY_DURATION_SECONDS_MAX,
+        DEFAULT_DISPLAY_DURATION_SECONDS
+    )
+    if StatsAPI and type(StatsAPI.SetDisplayDurationSeconds) == "function" then
+        StatsAPI:SetDisplayDurationSeconds(seconds)
+        return
+    end
+
+    local settings = ensureSettingsTable()
+    if not settings then
+        return
+    end
+    if settings.displayDurationSeconds == seconds then
+        return
+    end
+    settings.displayDurationSeconds = seconds
+    if StatsAPI and type(StatsAPI.SaveRunData) == "function" then
+        StatsAPI:SaveRunData()
+    end
+end
+
+local function setFadeInSeconds(value)
+    local seconds = clampSeconds(
+        value,
+        FADE_IN_SECONDS_MIN,
+        FADE_IN_SECONDS_MAX,
+        DEFAULT_FADE_IN_SECONDS
+    )
+    if StatsAPI and type(StatsAPI.SetFadeInSeconds) == "function" then
+        StatsAPI:SetFadeInSeconds(seconds)
+        return
+    end
+
+    local settings = ensureSettingsTable()
+    if not settings then
+        return
+    end
+    if settings.fadeInSeconds == seconds then
+        return
+    end
+    settings.fadeInSeconds = seconds
+    if StatsAPI and type(StatsAPI.SaveRunData) == "function" then
+        StatsAPI:SaveRunData()
+    end
+end
+
+local function setFadeOutSeconds(value)
+    local seconds = clampSeconds(
+        value,
+        FADE_OUT_SECONDS_MIN,
+        FADE_OUT_SECONDS_MAX,
+        DEFAULT_FADE_OUT_SECONDS
+    )
+    if StatsAPI and type(StatsAPI.SetFadeOutSeconds) == "function" then
+        StatsAPI:SetFadeOutSeconds(seconds)
+        return
+    end
+
+    local settings = ensureSettingsTable()
+    if not settings then
+        return
+    end
+    if settings.fadeOutSeconds == seconds then
+        return
+    end
+    settings.fadeOutSeconds = seconds
+    if StatsAPI and type(StatsAPI.SaveRunData) == "function" then
+        StatsAPI:SaveRunData()
+    end
+end
+
+local function secondsToScroll(seconds, maxSeconds)
+    local safeMax = tonumber(maxSeconds) or 10
+    if safeMax <= 0 then
+        safeMax = 10
+    end
+    local ratio = (tonumber(seconds) or 0) / safeMax
+    if ratio < 0 then
+        ratio = 0
+    elseif ratio > 1 then
+        ratio = 1
+    end
+    return math.floor((ratio * 10) + 0.5)
+end
+
+local function scrollToSeconds(value, maxSeconds, defaultValue)
+    local scroll = tonumber(value) or 0
+    if scroll < 0 then
+        scroll = 0
+    elseif scroll > 10 then
+        scroll = 10
+    end
+    local safeMax = tonumber(maxSeconds) or 10
+    if safeMax <= 0 then
+        safeMax = 10
+    end
+    local seconds = (scroll / 10) * safeMax
+    return clampSeconds(seconds, 0, safeMax, defaultValue)
 end
 
 function M.Setup()
@@ -468,6 +720,124 @@ function M.Setup()
         })
     end
 
+    local timingSubcategory = "Timing"
+    if type(ModConfigMenu.AddSpace) == "function" then
+        ModConfigMenu.AddSpace(category, timingSubcategory)
+    end
+    if type(ModConfigMenu.AddText) == "function" then
+        ModConfigMenu.AddText(category, timingSubcategory, "--- HUD Timing ---")
+    end
+
+    if hasNumberOption then
+        ModConfigMenu.AddSetting(category, timingSubcategory, {
+            Type = ModConfigMenu.OptionType.NUMBER,
+            CurrentSetting = function()
+                return getTabHoldSeconds()
+            end,
+            Minimum = TAB_HOLD_SECONDS_MIN,
+            Maximum = TAB_HOLD_SECONDS_MAX,
+            ModifyBy = 0.1,
+            Display = function()
+                return string.format("Hold To Show (sec): %.1f", getTabHoldSeconds())
+            end,
+            Info = {
+                "How long to hold TAB before HUD appears."
+            },
+            OnChange = function(value)
+                setTabHoldSeconds(value)
+            end
+        })
+
+        ModConfigMenu.AddSetting(category, timingSubcategory, {
+            Type = ModConfigMenu.OptionType.NUMBER,
+            CurrentSetting = function()
+                return getFadeInSeconds()
+            end,
+            Minimum = FADE_IN_SECONDS_MIN,
+            Maximum = FADE_IN_SECONDS_MAX,
+            ModifyBy = 0.1,
+            Display = function()
+                return string.format("Fade In (sec): %.1f", getFadeInSeconds())
+            end,
+            Info = {
+                "How long HUD takes to appear after hold is satisfied."
+            },
+            OnChange = function(value)
+                setFadeInSeconds(value)
+            end
+        })
+
+        ModConfigMenu.AddSetting(category, timingSubcategory, {
+            Type = ModConfigMenu.OptionType.NUMBER,
+            CurrentSetting = function()
+                return getFadeOutSeconds()
+            end,
+            Minimum = FADE_OUT_SECONDS_MIN,
+            Maximum = FADE_OUT_SECONDS_MAX,
+            ModifyBy = 0.1,
+            Display = function()
+                return string.format("Fade Out (sec): %.1f", getFadeOutSeconds())
+            end,
+            Info = {
+                "How long HUD takes to disappear after TAB release."
+            },
+            OnChange = function(value)
+                setFadeOutSeconds(value)
+            end
+        })
+    elseif hasScrollOption then
+        ModConfigMenu.AddSetting(category, timingSubcategory, {
+            Type = ModConfigMenu.OptionType.SCROLL,
+            CurrentSetting = function()
+                return secondsToScroll(getTabHoldSeconds(), TAB_HOLD_SECONDS_MAX)
+            end,
+            Display = function()
+                return string.format("Hold To Show (sec): %.1f", getTabHoldSeconds())
+            end,
+            Info = {
+                "How long to hold TAB before HUD appears.",
+                "SCROLL mode is coarse (0~10 steps)."
+            },
+            OnChange = function(value)
+                setTabHoldSeconds(scrollToSeconds(value, TAB_HOLD_SECONDS_MAX, DEFAULT_TAB_HOLD_SECONDS))
+            end
+        })
+
+        ModConfigMenu.AddSetting(category, timingSubcategory, {
+            Type = ModConfigMenu.OptionType.SCROLL,
+            CurrentSetting = function()
+                return secondsToScroll(getFadeInSeconds(), FADE_IN_SECONDS_MAX)
+            end,
+            Display = function()
+                return string.format("Fade In (sec): %.1f", getFadeInSeconds())
+            end,
+            Info = {
+                "How long HUD takes to appear after hold is satisfied.",
+                "SCROLL mode is coarse (0~10 steps)."
+            },
+            OnChange = function(value)
+                setFadeInSeconds(scrollToSeconds(value, FADE_IN_SECONDS_MAX, DEFAULT_FADE_IN_SECONDS))
+            end
+        })
+
+        ModConfigMenu.AddSetting(category, timingSubcategory, {
+            Type = ModConfigMenu.OptionType.SCROLL,
+            CurrentSetting = function()
+                return secondsToScroll(getFadeOutSeconds(), FADE_OUT_SECONDS_MAX)
+            end,
+            Display = function()
+                return string.format("Fade Out (sec): %.1f", getFadeOutSeconds())
+            end,
+            Info = {
+                "How long HUD takes to disappear after TAB release.",
+                "SCROLL mode is coarse (0~10 steps)."
+            },
+            OnChange = function(value)
+                setFadeOutSeconds(scrollToSeconds(value, FADE_OUT_SECONDS_MAX, DEFAULT_FADE_OUT_SECONDS))
+            end
+        })
+    end
+
     if type(ModConfigMenu.AddSpace) == "function" then
         ModConfigMenu.AddSpace(category, subcategory)
     end
@@ -481,7 +851,7 @@ function M.Setup()
         end,
         Info = {
             "Reset Multiplier HUD to defaults:",
-            "Display ON, Mode BOTH, Track Vanilla ON, Debug OFF, Offset X 0, Offset Y 0."
+            "Display ON, Mode BOTH, Track Vanilla ON, Debug OFF, Hold 0.0s, Fade In 0.2s, Fade Out 0.6s, Offset X 0, Offset Y 0."
         },
         OnChange = function(value)
             if value then
