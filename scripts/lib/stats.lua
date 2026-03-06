@@ -1,11 +1,11 @@
--- Stat Utils - Stats Library
+-- StatsAPI - Stats Library
 -- Unified multiplier management, HUD display UI, and stat application functions
 -- Standalone version (no external dependencies except Isaac API)
 
-StatUtils.stats = StatUtils.stats or {}
+StatsAPI.stats = StatsAPI.stats or {}
 
 -- base stats
-StatUtils.stats.BASE_STATS = {
+StatsAPI.stats.BASE_STATS = {
     damage = 3.5,
     tears = 7,
     speed = 1.0,
@@ -17,7 +17,7 @@ StatUtils.stats.BASE_STATS = {
 -------------------------------------------------------------------------------
 -- Unified Multiplier Management System
 -------------------------------------------------------------------------------
-StatUtils.stats.unifiedMultipliers = StatUtils.stats.unifiedMultipliers or {}
+StatsAPI.stats.unifiedMultipliers = StatsAPI.stats.unifiedMultipliers or {}
 
 local function _playerScopedSourceKey(sourceKey)
     if sourceKey == nil then
@@ -27,15 +27,15 @@ local function _playerScopedSourceKey(sourceKey)
 end
 
 -- Initialize unified multiplier system for a player
-function StatUtils.stats.unifiedMultipliers:InitPlayer(player)
+function StatsAPI.stats.unifiedMultipliers:InitPlayer(player)
     if not player then return end
 
     if not self._tableRefLogged then
         self._tableRefLogged = true
-        StatUtils.printDebug(string.format("[Unified] table ref = %s", tostring(self)))
+        StatsAPI.printDebug(string.format("[Unified] table ref = %s", tostring(self)))
     end
 
-    local playerID = StatUtils:GetPlayerInstanceKey(player)
+    local playerID = StatsAPI:GetPlayerInstanceKey(player)
     if not self[playerID] then
         self[playerID] = {
             itemMultipliers = {},
@@ -46,7 +46,7 @@ function StatUtils.stats.unifiedMultipliers:InitPlayer(player)
             sequenceCounter = 0,
             pendingCache = {}
         }
-        StatUtils.printDebug(string.format("Unified Multipliers: Initialized for player %s", playerID))
+        StatsAPI.printDebug(string.format("Unified Multipliers: Initialized for player %s", playerID))
     end
 end
 
@@ -81,11 +81,11 @@ local function _toEquivalentMultiplierFromAddition(player, statType, addition)
 end
 
 local function _isVanillaDisplayTrackingEnabled()
-    if StatUtils and type(StatUtils.IsVanillaDisplayTrackingEnabled) == "function" then
-        return StatUtils:IsVanillaDisplayTrackingEnabled()
+    if StatsAPI and type(StatsAPI.IsVanillaDisplayTrackingEnabled) == "function" then
+        return StatsAPI:IsVanillaDisplayTrackingEnabled()
     end
-    if StatUtils and type(StatUtils.settings) == "table" then
-        return StatUtils.settings.trackVanillaDisplay ~= false
+    if StatsAPI and type(StatsAPI.settings) == "table" then
+        return StatsAPI.settings.trackVanillaDisplay ~= false
     end
     return true
 end
@@ -94,17 +94,17 @@ local function _getVanillaDisplayMultiplier(player, statType)
     if not player or not _isVanillaDisplayTrackingEnabled() then
         return 1.0
     end
-    if not StatUtils or type(StatUtils.VanillaMultipliers) ~= "table" then
+    if not StatsAPI or type(StatsAPI.VanillaMultipliers) ~= "table" then
         return 1.0
     end
 
     local vanillaMultiplier = 1.0
     if statType == "Damage"
-        and type(StatUtils.VanillaMultipliers.GetPlayerDamageMultiplier) == "function" then
-        vanillaMultiplier = StatUtils.VanillaMultipliers:GetPlayerDamageMultiplier(player) or 1.0
+        and type(StatsAPI.VanillaMultipliers.GetPlayerDamageMultiplier) == "function" then
+        vanillaMultiplier = StatsAPI.VanillaMultipliers:GetPlayerDamageMultiplier(player) or 1.0
     elseif statType == "Tears"
-        and type(StatUtils.VanillaMultipliers.GetPlayerFireRateMultiplier) == "function" then
-        vanillaMultiplier = StatUtils.VanillaMultipliers:GetPlayerFireRateMultiplier(player) or 1.0
+        and type(StatsAPI.VanillaMultipliers.GetPlayerFireRateMultiplier) == "function" then
+        vanillaMultiplier = StatsAPI.VanillaMultipliers:GetPlayerFireRateMultiplier(player) or 1.0
     end
 
     if type(vanillaMultiplier) ~= "number" or vanillaMultiplier <= 0 then
@@ -114,14 +114,14 @@ local function _getVanillaDisplayMultiplier(player, statType)
 end
 
 -- Add or update multiplier for a specific item and stat
-function StatUtils.stats.unifiedMultipliers:SetItemMultiplier(player, itemID, statType, multiplier, description)
+function StatsAPI.stats.unifiedMultipliers:SetItemMultiplier(player, itemID, statType, multiplier, description)
     if not player or not itemID or not statType or not multiplier then
-        StatUtils.printError("SetItemMultiplier: Invalid parameters")
+        StatsAPI.printError("SetItemMultiplier: Invalid parameters")
         return
     end
 
     self:InitPlayer(player)
-    local playerID = StatUtils:GetPlayerInstanceKey(player)
+    local playerID = StatsAPI:GetPlayerInstanceKey(player)
     local currentFrame = Game():GetFrameCount()
     self[playerID].lastSetFrame = self[playerID].lastSetFrame or {}
     local key = tostring(itemID) .. ":" .. tostring(statType)
@@ -134,16 +134,16 @@ function StatUtils.stats.unifiedMultipliers:SetItemMultiplier(player, itemID, st
         and type(existing.value) == "number"
         and existing.value == multiplier
         and existing.disabled ~= true then
-        StatUtils.printDebug(string.format("SetItemMultiplier skipped (same frame, same active value) for %s", key))
+        StatsAPI.printDebug(string.format("SetItemMultiplier skipped (same frame, same active value) for %s", key))
         return
     end
 
-    StatUtils.printDebug(string.format("SetItemMultiplier: Player %s, Item %s, Stat %s, Value %.2fx",
+    StatsAPI.printDebug(string.format("SetItemMultiplier: Player %s, Item %s, Stat %s, Value %.2fx",
         playerID, tostring(itemID), statType, multiplier))
 
     if not self[playerID].itemMultipliers[itemID] then
         self[playerID].itemMultipliers[itemID] = {}
-        StatUtils.printDebug(string.format("  Created new item entry for item %s", tostring(itemID)))
+        StatsAPI.printDebug(string.format("  Created new item entry for item %s", tostring(itemID)))
     end
 
     local willAdvanceSequence = true
@@ -157,9 +157,9 @@ function StatUtils.stats.unifiedMultipliers:SetItemMultiplier(player, itemID, st
     local currentSequence = self[playerID].sequenceCounter
 
     if willAdvanceSequence then
-        StatUtils.printDebug(string.format("  Advancing sequence to %d for %s", currentSequence, key))
+        StatsAPI.printDebug(string.format("  Advancing sequence to %d for %s", currentSequence, key))
     else
-        StatUtils.printDebug(string.format("  Sequence unchanged (%d) for %s (same value)", currentSequence, key))
+        StatsAPI.printDebug(string.format("  Sequence unchanged (%d) for %s (same value)", currentSequence, key))
     end
 
     self[playerID].itemMultipliers[itemID][statType] = {
@@ -170,11 +170,11 @@ function StatUtils.stats.unifiedMultipliers:SetItemMultiplier(player, itemID, st
         disabled = existing and existing.disabled == true or false
     }
 
-    StatUtils.printDebug(string.format("  Stored: Item %s %s = %.2fx (Sequence: %d)", tostring(itemID), statType, multiplier, self[playerID].sequenceCounter))
+    StatsAPI.printDebug(string.format("  Stored: Item %s %s = %.2fx (Sequence: %d)", tostring(itemID), statType, multiplier, self[playerID].sequenceCounter))
 
-    StatUtils.printDebug(string.format("  Current multipliers for item %s:", tostring(itemID)))
+    StatsAPI.printDebug(string.format("  Current multipliers for item %s:", tostring(itemID)))
     for stat, data in pairs(self[playerID].itemMultipliers[itemID]) do
-        StatUtils.printDebug(string.format("    %s: %.2fx (%s)", stat, data.value, data.description))
+        StatsAPI.printDebug(string.format("    %s: %.2fx (%s)", stat, data.value, data.description))
     end
 
     self:RecalculateStatMultiplier(player, statType)
@@ -182,29 +182,29 @@ function StatUtils.stats.unifiedMultipliers:SetItemMultiplier(player, itemID, st
 end
 
 -- Add or update addition entry for a specific item and stat
-function StatUtils.stats.unifiedMultipliers:SetItemAddition(player, itemID, statType, addition, description)
+function StatsAPI.stats.unifiedMultipliers:SetItemAddition(player, itemID, statType, addition, description)
     if not player or not itemID or not statType or type(addition) ~= "number" then
-        StatUtils.printError("SetItemAddition: Invalid parameters")
+        StatsAPI.printError("SetItemAddition: Invalid parameters")
         return
     end
 
     self:InitPlayer(player)
-    local playerID = StatUtils:GetPlayerInstanceKey(player)
+    local playerID = StatsAPI:GetPlayerInstanceKey(player)
     local currentFrame = Game():GetFrameCount()
     self[playerID].lastSetFrameAdd = self[playerID].lastSetFrameAdd or {}
     local key = tostring(itemID) .. ":" .. tostring(statType)
 
     if self[playerID].lastSetFrameAdd[key] == currentFrame then
-        StatUtils.printDebug(string.format("SetItemAddition skipped (same frame) for %s", key))
+        StatsAPI.printDebug(string.format("SetItemAddition skipped (same frame) for %s", key))
         return
     end
 
-    StatUtils.printDebug(string.format("SetItemAddition: Player %s, Item %s, Stat %s, Value %+0.2f",
+    StatsAPI.printDebug(string.format("SetItemAddition: Player %s, Item %s, Stat %s, Value %+0.2f",
         playerID, tostring(itemID), statType, addition))
 
     if not self[playerID].itemAdditions[itemID] then
         self[playerID].itemAdditions[itemID] = {}
-        StatUtils.printDebug(string.format("  Created new addition entry for item %s", tostring(itemID)))
+        StatsAPI.printDebug(string.format("  Created new addition entry for item %s", tostring(itemID)))
     end
 
     local existing = self[playerID].itemAdditions[itemID][statType]
@@ -224,7 +224,7 @@ function StatUtils.stats.unifiedMultipliers:SetItemAddition(player, itemID, stat
         disabled = existing and existing.disabled == true or false
     }
 
-    StatUtils.printDebug(string.format("  Stored Addition: Item %s %s = %+0.2f (Cumulative: %+0.2f, Sequence: %d)",
+    StatsAPI.printDebug(string.format("  Stored Addition: Item %s %s = %+0.2f (Cumulative: %+0.2f, Sequence: %d)",
         tostring(itemID), statType, addition, self[playerID].itemAdditions[itemID][statType].cumulative, currentSequence))
 
     self:RecalculateStatMultiplier(player, statType)
@@ -232,14 +232,14 @@ function StatUtils.stats.unifiedMultipliers:SetItemAddition(player, itemID, stat
 end
 
 -- Add or update additive-multiplier entry for a specific item and stat
-function StatUtils.stats.unifiedMultipliers:SetItemAdditiveMultiplier(player, itemID, statType, multiplierValue, description)
+function StatsAPI.stats.unifiedMultipliers:SetItemAdditiveMultiplier(player, itemID, statType, multiplierValue, description)
     if not player or not itemID or not statType or type(multiplierValue) ~= "number" then
-        StatUtils.printError("SetItemAdditiveMultiplier: Invalid parameters")
+        StatsAPI.printError("SetItemAdditiveMultiplier: Invalid parameters")
         return
     end
 
     self:InitPlayer(player)
-    local playerID = StatUtils:GetPlayerInstanceKey(player)
+    local playerID = StatsAPI:GetPlayerInstanceKey(player)
     local currentFrame = Game():GetFrameCount()
     self[playerID].lastSetFrameAddMul = self[playerID].lastSetFrameAddMul or {}
     local key = tostring(itemID) .. ":" .. tostring(statType)
@@ -249,18 +249,18 @@ function StatUtils.stats.unifiedMultipliers:SetItemAdditiveMultiplier(player, it
         local prevDelta = existing and existing.lastDelta or nil
         local newDelta = multiplierValue - 1.0
         if prevDelta and math.abs(prevDelta - newDelta) < 0.00001 then
-            StatUtils.printDebug(string.format("SetItemAdditiveMultiplier skipped (same frame, same delta) for %s", key))
+            StatsAPI.printDebug(string.format("SetItemAdditiveMultiplier skipped (same frame, same delta) for %s", key))
             return
         end
     end
 
     local delta = multiplierValue - 1.0
-    StatUtils.printDebug(string.format("SetItemAdditiveMultiplier: Player %s, Item %s, Stat %s, Mult %.2fx (Delta %+0.2f)",
+    StatsAPI.printDebug(string.format("SetItemAdditiveMultiplier: Player %s, Item %s, Stat %s, Mult %.2fx (Delta %+0.2f)",
         playerID, tostring(itemID), statType, multiplierValue, delta))
 
     if not self[playerID].itemAdditiveMultipliers[itemID] then
         self[playerID].itemAdditiveMultipliers[itemID] = {}
-        StatUtils.printDebug(string.format("  Created new additive-mult entry for item %s", tostring(itemID)))
+        StatsAPI.printDebug(string.format("  Created new additive-mult entry for item %s", tostring(itemID)))
     end
 
     local existing = self[playerID].itemAdditiveMultipliers[itemID][statType]
@@ -280,7 +280,7 @@ function StatUtils.stats.unifiedMultipliers:SetItemAdditiveMultiplier(player, it
     end
     self[playerID].itemAdditiveMultipliers[itemID][statType] = entry
 
-    StatUtils.printDebug(string.format("  Stored Additive Mult: Item %s %s = x%.2f (Delta %+0.2f, Seq %d)",
+    StatsAPI.printDebug(string.format("  Stored Additive Mult: Item %s %s = x%.2f (Delta %+0.2f, Seq %d)",
         tostring(itemID), statType, multiplierValue, delta, currentSequence))
 
     self:RecalculateStatMultiplier(player, statType)
@@ -288,13 +288,13 @@ function StatUtils.stats.unifiedMultipliers:SetItemAdditiveMultiplier(player, it
 end
 
 -- Enable/disable multiplier entry for a specific item and stat without deleting data
-function StatUtils.stats.unifiedMultipliers:SetItemMultiplierDisabled(player, itemID, statType, disabled)
+function StatsAPI.stats.unifiedMultipliers:SetItemMultiplierDisabled(player, itemID, statType, disabled)
     if not player or not itemID or not statType then
         return false
     end
 
     self:InitPlayer(player)
-    local playerID = StatUtils:GetPlayerInstanceKey(player)
+    local playerID = StatsAPI:GetPlayerInstanceKey(player)
     local target = (disabled == true)
     local foundEntry = false
     local changed = false
@@ -331,7 +331,7 @@ function StatUtils.stats.unifiedMultipliers:SetItemMultiplierDisabled(player, it
 
     if changed then
         self:RecalculateStatMultiplier(player, statType)
-        StatUtils.printDebug(string.format(
+        StatsAPI.printDebug(string.format(
             "Unified Multipliers: %s Item %s %s (disabled=%s)",
             target and "Disabled" or "Enabled",
             tostring(itemID),
@@ -344,7 +344,7 @@ function StatUtils.stats.unifiedMultipliers:SetItemMultiplierDisabled(player, it
 end
 
 -- Player-scoped wrappers: use sourceKey instead of itemID
-function StatUtils.stats.unifiedMultipliers:SetPlayerMultiplier(player, sourceKey, statType, multiplier, description)
+function StatsAPI.stats.unifiedMultipliers:SetPlayerMultiplier(player, sourceKey, statType, multiplier, description)
     local scopedKey = _playerScopedSourceKey(sourceKey)
     if not scopedKey then
         return false
@@ -353,7 +353,7 @@ function StatUtils.stats.unifiedMultipliers:SetPlayerMultiplier(player, sourceKe
     return true
 end
 
-function StatUtils.stats.unifiedMultipliers:SetPlayerAddition(player, sourceKey, statType, addition, description)
+function StatsAPI.stats.unifiedMultipliers:SetPlayerAddition(player, sourceKey, statType, addition, description)
     local scopedKey = _playerScopedSourceKey(sourceKey)
     if not scopedKey then
         return false
@@ -362,7 +362,7 @@ function StatUtils.stats.unifiedMultipliers:SetPlayerAddition(player, sourceKey,
     return true
 end
 
-function StatUtils.stats.unifiedMultipliers:SetPlayerAdditiveMultiplier(player, sourceKey, statType, multiplierValue, description)
+function StatsAPI.stats.unifiedMultipliers:SetPlayerAdditiveMultiplier(player, sourceKey, statType, multiplierValue, description)
     local scopedKey = _playerScopedSourceKey(sourceKey)
     if not scopedKey then
         return false
@@ -371,7 +371,7 @@ function StatUtils.stats.unifiedMultipliers:SetPlayerAdditiveMultiplier(player, 
     return true
 end
 
-function StatUtils.stats.unifiedMultipliers:SetPlayerMultiplierDisabled(player, sourceKey, statType, disabled)
+function StatsAPI.stats.unifiedMultipliers:SetPlayerMultiplierDisabled(player, sourceKey, statType, disabled)
     local scopedKey = _playerScopedSourceKey(sourceKey)
     if not scopedKey then
         return false
@@ -379,7 +379,7 @@ function StatUtils.stats.unifiedMultipliers:SetPlayerMultiplierDisabled(player, 
     return self:SetItemMultiplierDisabled(player, scopedKey, statType, disabled)
 end
 
-function StatUtils.stats.unifiedMultipliers:RemovePlayerMultiplier(player, sourceKey, statType)
+function StatsAPI.stats.unifiedMultipliers:RemovePlayerMultiplier(player, sourceKey, statType)
     local scopedKey = _playerScopedSourceKey(sourceKey)
     if not scopedKey then
         return false
@@ -388,7 +388,7 @@ function StatUtils.stats.unifiedMultipliers:RemovePlayerMultiplier(player, sourc
     return true
 end
 
-function StatUtils.stats.unifiedMultipliers:RemovePlayerAddition(player, sourceKey, statType)
+function StatsAPI.stats.unifiedMultipliers:RemovePlayerAddition(player, sourceKey, statType)
     local scopedKey = _playerScopedSourceKey(sourceKey)
     if not scopedKey then
         return false
@@ -398,10 +398,10 @@ function StatUtils.stats.unifiedMultipliers:RemovePlayerAddition(player, sourceK
 end
 
 -- Remove multiplier for a specific item and stat
-function StatUtils.stats.unifiedMultipliers:RemoveItemMultiplier(player, itemID, statType)
+function StatsAPI.stats.unifiedMultipliers:RemoveItemMultiplier(player, itemID, statType)
     if not player or not itemID or not statType then return end
 
-    local playerID = StatUtils:GetPlayerInstanceKey(player)
+    local playerID = StatsAPI:GetPlayerInstanceKey(player)
     local removed = false
 
     if self[playerID] and self[playerID].itemMultipliers[itemID] then
@@ -430,15 +430,15 @@ function StatUtils.stats.unifiedMultipliers:RemoveItemMultiplier(player, itemID,
 
     if removed then
         self:RecalculateStatMultiplier(player, statType)
-        StatUtils.printDebug(string.format("Unified Multipliers: Removed source %s %s (base/add/addMul)", tostring(itemID), statType))
+        StatsAPI.printDebug(string.format("Unified Multipliers: Removed source %s %s (base/add/addMul)", tostring(itemID), statType))
     end
 end
 
 -- Remove addition AND additive multiplier for a specific item and stat
-function StatUtils.stats.unifiedMultipliers:RemoveItemAddition(player, itemID, statType)
+function StatsAPI.stats.unifiedMultipliers:RemoveItemAddition(player, itemID, statType)
     if not player or not itemID or not statType then return end
 
-    local playerID = StatUtils:GetPlayerInstanceKey(player)
+    local playerID = StatsAPI:GetPlayerInstanceKey(player)
     local removed = false
 
     if self[playerID] and self[playerID].itemAdditions and self[playerID].itemAdditions[itemID] then
@@ -459,15 +459,15 @@ function StatUtils.stats.unifiedMultipliers:RemoveItemAddition(player, itemID, s
 
     if removed then
         self:RecalculateStatMultiplier(player, statType)
-        StatUtils.printDebug(string.format("Unified Multipliers: Removed Addition/AdditiveMult Item %s %s", tostring(itemID), statType))
+        StatsAPI.printDebug(string.format("Unified Multipliers: Removed Addition/AdditiveMult Item %s %s", tostring(itemID), statType))
     end
 end
 
 -- Recalculate total multiplier for a specific stat
-function StatUtils.stats.unifiedMultipliers:RecalculateStatMultiplier(player, statType)
+function StatsAPI.stats.unifiedMultipliers:RecalculateStatMultiplier(player, statType)
     if not player or not statType then return end
 
-    local playerID = StatUtils:GetPlayerInstanceKey(player)
+    local playerID = StatsAPI:GetPlayerInstanceKey(player)
     if not self[playerID] then return end
 
     local totalMultiplierApply = 1.0
@@ -479,7 +479,7 @@ function StatUtils.stats.unifiedMultipliers:RecalculateStatMultiplier(player, st
     local lastDisplaySequence = 0
     local lastDisplayType = "multiplier"
 
-    StatUtils.printDebug(string.format("Recalculating %s for player %s:", statType, playerID))
+    StatsAPI.printDebug(string.format("Recalculating %s for player %s:", statType, playerID))
 
     -- Build union of touched itemIDs
     local touched = {}
@@ -584,7 +584,7 @@ function StatUtils.stats.unifiedMultipliers:RecalculateStatMultiplier(player, st
             setDisplayCandidate(baseSeq, baseM, baseType, itemID, baseDesc)
         end
 
-        StatUtils.printDebug(string.format(
+        StatsAPI.printDebug(string.format(
             "  Item %s: base=%.2f (enabled=%s), addMulDelta=%+0.2f (enabled=%s), eff=%.2f, addCum=%+0.2f (enabled=%s)",
             tostring(itemID),
             baseM,
@@ -622,7 +622,7 @@ function StatUtils.stats.unifiedMultipliers:RecalculateStatMultiplier(player, st
     }
 
     if lastDisplayType == "add_mult" or lastDisplayType == "remove_mult" then
-        StatUtils.printDebug(string.format(
+        StatsAPI.printDebug(string.format(
             "Unified Multipliers: %s recalculated - Current: %+0.2f (from %s, seq: %d), Total: %.2fx (display, vanilla %.2fx), Apply: %.2fx",
             statType,
             lastDisplayCurrentVal,
@@ -633,7 +633,7 @@ function StatUtils.stats.unifiedMultipliers:RecalculateStatMultiplier(player, st
             computedTotalApply
         ))
     else
-        StatUtils.printDebug(string.format(
+        StatsAPI.printDebug(string.format(
             "Unified Multipliers: %s recalculated - Current: %.2fx (from %s, seq: %d), Total: %.2fx (display, vanilla %.2fx), Apply: %.2fx",
             statType,
             lastDisplayCurrentVal,
@@ -645,8 +645,8 @@ function StatUtils.stats.unifiedMultipliers:RecalculateStatMultiplier(player, st
         ))
     end
 
-    if StatUtils.stats.multiplierDisplay then
-        StatUtils.stats.multiplierDisplay:UpdateFromUnifiedSystem(
+    if StatsAPI.stats.multiplierDisplay then
+        StatsAPI.stats.multiplierDisplay:UpdateFromUnifiedSystem(
             player,
             statType,
             lastDisplayCurrentVal,
@@ -661,10 +661,10 @@ function StatUtils.stats.unifiedMultipliers:RecalculateStatMultiplier(player, st
 end
 
 -- Get current and total multipliers for a stat
-function StatUtils.stats.unifiedMultipliers:GetMultipliers(player, statType)
+function StatsAPI.stats.unifiedMultipliers:GetMultipliers(player, statType)
     if not player or not statType then return 1.0, 1.0 end
 
-    local playerID = StatUtils:GetPlayerInstanceKey(player)
+    local playerID = StatsAPI:GetPlayerInstanceKey(player)
     if not self[playerID] or not self[playerID].statMultipliers[statType] then
         return 1.0, 1.0
     end
@@ -674,10 +674,10 @@ function StatUtils.stats.unifiedMultipliers:GetMultipliers(player, statType)
 end
 
 -- Get all multipliers for a player
-function StatUtils.stats.unifiedMultipliers:GetAllMultipliers(player)
+function StatsAPI.stats.unifiedMultipliers:GetAllMultipliers(player)
     if not player then return {} end
 
-    local playerID = StatUtils:GetPlayerInstanceKey(player)
+    local playerID = StatsAPI:GetPlayerInstanceKey(player)
     if not self[playerID] or not self[playerID].statMultipliers then
         return {}
     end
@@ -686,23 +686,23 @@ function StatUtils.stats.unifiedMultipliers:GetAllMultipliers(player)
 end
 
 -- Reset all multipliers for a player (for new game)
-function StatUtils.stats.unifiedMultipliers:ResetPlayer(player)
+function StatsAPI.stats.unifiedMultipliers:ResetPlayer(player)
     if not player then return end
 
-    local playerID = StatUtils:GetPlayerInstanceKey(player)
+    local playerID = StatsAPI:GetPlayerInstanceKey(player)
     self[playerID] = nil
 
-    StatUtils.printDebug(string.format("Unified Multipliers: Reset for player %s", playerID))
+    StatsAPI.printDebug(string.format("Unified Multipliers: Reset for player %s", playerID))
 end
 
--- Save multipliers (uses StatUtils built-in save system)
-function StatUtils.stats.unifiedMultipliers:SaveToSaveManager(player)
+-- Save multipliers (uses StatsAPI built-in save system)
+function StatsAPI.stats.unifiedMultipliers:SaveToSaveManager(player)
     if not player then return end
 
-    local playerID = StatUtils:GetPlayerInstanceKey(player)
+    local playerID = StatsAPI:GetPlayerInstanceKey(player)
     if not self[playerID] then return end
 
-    local playerSave = StatUtils:GetPlayerRunData(player)
+    local playerSave = StatsAPI:GetPlayerRunData(player)
 
     if playerSave then
         local function serializeItemKey(itemID)
@@ -781,17 +781,17 @@ function StatUtils.stats.unifiedMultipliers:SaveToSaveManager(player)
         for _ in pairs(serialItemAdditions) do addCount = addCount + 1 end
         local addMultCount = 0
         for _ in pairs(serialItemAdditiveMultipliers) do addMultCount = addMultCount + 1 end
-        StatUtils.printDebug(string.format("Unified Multipliers: Saved for player %s (mults:%d, adds:%d, addMults:%d)",
+        StatsAPI.printDebug(string.format("Unified Multipliers: Saved for player %s (mults:%d, adds:%d, addMults:%d)",
             playerID, multCount, addCount, addMultCount))
     end
 end
 
--- Load multipliers (uses StatUtils built-in save system)
-function StatUtils.stats.unifiedMultipliers:LoadFromSaveManager(player)
+-- Load multipliers (uses StatsAPI built-in save system)
+function StatsAPI.stats.unifiedMultipliers:LoadFromSaveManager(player)
     if not player then return end
 
-    local playerID = StatUtils:GetPlayerInstanceKey(player)
-    local playerSave = StatUtils:GetPlayerRunData(player)
+    local playerID = StatsAPI:GetPlayerInstanceKey(player)
+    local playerSave = StatsAPI:GetPlayerRunData(player)
 
     if playerSave and playerSave.unifiedMultipliers then
         self:InitPlayer(player)
@@ -848,7 +848,7 @@ function StatUtils.stats.unifiedMultipliers:LoadFromSaveManager(player)
         for _ in pairs(self[playerID].itemAdditions) do addCount = addCount + 1 end
         local addMultCount = 0
         for _ in pairs(self[playerID].itemAdditiveMultipliers) do addMultCount = addMultCount + 1 end
-        StatUtils.printDebug(string.format("Unified Multipliers: Loaded for player %s (mults:%d, adds:%d, addMults:%d)",
+        StatsAPI.printDebug(string.format("Unified Multipliers: Loaded for player %s (mults:%d, adds:%d, addMults:%d)",
             playerID, multCount, addCount, addMultCount))
 
         local allStatTypes = {}
@@ -873,7 +873,7 @@ function StatUtils.stats.unifiedMultipliers:LoadFromSaveManager(player)
 
         for statType, _ in pairs(allStatTypes) do
             self:RecalculateStatMultiplier(player, statType)
-            StatUtils.printDebug(string.format("[Unified] Recalculated %s after loading", statType))
+            StatsAPI.printDebug(string.format("[Unified] Recalculated %s after loading", statType))
         end
 
         self._justLoaded = true
@@ -883,11 +883,11 @@ end
 -------------------------------------------------------------------------------
 -- Multiplier Display System (HUD overlay)
 -------------------------------------------------------------------------------
-StatUtils.stats.multiplierDisplay = StatUtils.stats.multiplierDisplay or {}
+StatsAPI.stats.multiplierDisplay = StatsAPI.stats.multiplierDisplay or {}
 
 local StatsFont = Font()
 StatsFont:Load("font/luaminioutlined.fnt")
-StatUtils.printDebug("Using Isaac default font for multiplier display")
+StatsAPI.printDebug("Using Isaac default font for multiplier display")
 
 local ButtonAction_ACTION_MAP = ButtonAction.ACTION_MAP
 
@@ -932,17 +932,17 @@ local STATS_PLUS_SPACING_X = 5
 local BASE_STAT_OFFSET_X = 48
 local BASE_STAT_OFFSET_Y = 1
 
-StatUtils.stats.multiplierDisplay.playerData = {}
+StatsAPI.stats.multiplierDisplay.playerData = {}
 
-function StatUtils.stats.multiplierDisplay:InitPlayer(player)
+function StatsAPI.stats.multiplierDisplay:InitPlayer(player)
     if not self._tableRefLogged then
         self._tableRefLogged = true
-        StatUtils.printDebug(string.format("[Display] table ref = %s", tostring(self)))
+        StatsAPI.printDebug(string.format("[Display] table ref = %s", tostring(self)))
     end
 
-    local playerID = StatUtils:GetPlayerInstanceKey(player)
+    local playerID = StatsAPI:GetPlayerInstanceKey(player)
     if not self.playerData[playerID] then
-        StatUtils.printDebug(string.format("InitPlayer: Creating new player data for player ID %s", playerID))
+        StatsAPI.printDebug(string.format("InitPlayer: Creating new player data for player ID %s", playerID))
         self.playerData[playerID] = {
             displayStartFrame = 0,
             isDisplaying = false,
@@ -956,11 +956,11 @@ function StatUtils.stats.multiplierDisplay:InitPlayer(player)
     end
 end
 
-function StatUtils.stats.multiplierDisplay:UpdateFromUnifiedSystem(player, statType, currentValue, totalMult, currentType)
+function StatsAPI.stats.multiplierDisplay:UpdateFromUnifiedSystem(player, statType, currentValue, totalMult, currentType)
     if not player or not statType then return end
 
     self:InitPlayer(player)
-    local playerID = StatUtils:GetPlayerInstanceKey(player)
+    local playerID = StatsAPI:GetPlayerInstanceKey(player)
 
     -- Do not display plain additions
     if currentType == "addition" then
@@ -984,27 +984,27 @@ function StatUtils.stats.multiplierDisplay:UpdateFromUnifiedSystem(player, statT
     self.playerData[playerID].isDisplaying = true
 
     if currentType == "addition" then
-        StatUtils.printDebug(string.format("Multiplier Display Updated: %s - Current: %+0.2f, Total: %.2fx (addition)",
+        StatsAPI.printDebug(string.format("Multiplier Display Updated: %s - Current: %+0.2f, Total: %.2fx (addition)",
             statType, currentValue, totalMult))
     else
-        StatUtils.printDebug(string.format("Multiplier Display Updated: %s - Current: %.2fx, Total: %.2fx",
+        StatsAPI.printDebug(string.format("Multiplier Display Updated: %s - Current: %.2fx, Total: %.2fx",
             statType, currentValue, totalMult))
     end
 
-    StatUtils.printDebug(string.format("  Current unified data for player %s:", playerID))
+    StatsAPI.printDebug(string.format("  Current unified data for player %s:", playerID))
     for stat, data in pairs(self.playerData[playerID].unifiedData) do
         if data.currentType == "addition" then
-            StatUtils.printDebug(string.format("    %s: Current=%+0.2f, Total=%.2fx", stat, data.current, data.total))
+            StatsAPI.printDebug(string.format("    %s: Current=%+0.2f, Total=%.2fx", stat, data.current, data.total))
         else
-            StatUtils.printDebug(string.format("    %s: Current=%.2fx, Total=%.2fx", stat, data.current, data.total))
+            StatsAPI.printDebug(string.format("    %s: Current=%.2fx, Total=%.2fx", stat, data.current, data.total))
         end
     end
 end
 
-function StatUtils.stats.multiplierDisplay:ForceDisplay(player, statType, currentValue, totalMult, currentType)
+function StatsAPI.stats.multiplierDisplay:ForceDisplay(player, statType, currentValue, totalMult, currentType)
     if not player or not statType then return end
     self:InitPlayer(player)
-    local playerID = StatUtils:GetPlayerInstanceKey(player)
+    local playerID = StatsAPI:GetPlayerInstanceKey(player)
     if not self.playerData[playerID].unifiedData then
         self.playerData[playerID].unifiedData = {}
     end
@@ -1018,14 +1018,14 @@ function StatUtils.stats.multiplierDisplay:ForceDisplay(player, statType, curren
     self.playerData[playerID].isDisplaying = true
 end
 
-function StatUtils.stats.multiplierDisplay:RefreshFromUnified(player)
-    if not player or not StatUtils.stats or not StatUtils.stats.unifiedMultipliers then
+function StatsAPI.stats.multiplierDisplay:RefreshFromUnified(player)
+    if not player or not StatsAPI.stats or not StatsAPI.stats.unifiedMultipliers then
         return false
     end
 
     self:InitPlayer(player)
-    local playerID = StatUtils:GetPlayerInstanceKey(player)
-    local all = StatUtils.stats.unifiedMultipliers:GetAllMultipliers(player)
+    local playerID = StatsAPI:GetPlayerInstanceKey(player)
+    local all = StatsAPI.stats.unifiedMultipliers:GetAllMultipliers(player)
     local hasAny = false
 
     self.playerData[playerID].unifiedData = {}
@@ -1063,7 +1063,7 @@ function StatUtils.stats.multiplierDisplay:RefreshFromUnified(player)
     return hasAny
 end
 
-function StatUtils.stats.multiplierDisplay:RefreshAllFromUnified()
+function StatsAPI.stats.multiplierDisplay:RefreshAllFromUnified()
     local hasAny = false
     local numPlayers = Game():GetNumPlayers()
     for i = 0, numPlayers - 1 do
@@ -1080,11 +1080,11 @@ local function GetHUDRelativeDisplayOffset()
     local vanillaHUDOffset = Vector(20 * hudOffset, 12 * hudOffset)
 
     local customX, customY = 0, 0
-    if StatUtils and type(StatUtils.GetDisplayOffsets) == "function" then
-        customX, customY = StatUtils:GetDisplayOffsets()
-    elseif StatUtils and type(StatUtils.settings) == "table" then
-        customX = tonumber(StatUtils.settings.displayOffsetX) or 0
-        customY = tonumber(StatUtils.settings.displayOffsetY) or 0
+    if StatsAPI and type(StatsAPI.GetDisplayOffsets) == "function" then
+        customX, customY = StatsAPI:GetDisplayOffsets()
+    elseif StatsAPI and type(StatsAPI.settings) == "table" then
+        customX = tonumber(StatsAPI.settings.displayOffsetX) or 0
+        customY = tonumber(StatsAPI.settings.displayOffsetY) or 0
     end
 
     local customOffset = Vector(customX, customY)
@@ -1283,30 +1283,30 @@ local VANILLA_DISPLAY_TRACKED_STATS = {"Damage", "Tears"}
 
 local function GetUnifiedStatEntry(player, statType)
     if not player
-        or not StatUtils
-        or not StatUtils.stats
-        or not StatUtils.stats.unifiedMultipliers
-        or type(StatUtils.GetPlayerInstanceKey) ~= "function" then
+        or not StatsAPI
+        or not StatsAPI.stats
+        or not StatsAPI.stats.unifiedMultipliers
+        or type(StatsAPI.GetPlayerInstanceKey) ~= "function" then
         return nil
     end
 
-    local unified = StatUtils.stats.unifiedMultipliers
-    local playerID = StatUtils:GetPlayerInstanceKey(player)
+    local unified = StatsAPI.stats.unifiedMultipliers
+    local playerID = StatsAPI:GetPlayerInstanceKey(player)
     local perPlayer = unified and unified[playerID]
     return perPlayer and perPlayer.statMultipliers and perPlayer.statMultipliers[statType] or nil
 end
 
 local function HasActiveCustomContribution(player, statType)
     if not player
-        or not StatUtils
-        or not StatUtils.stats
-        or not StatUtils.stats.unifiedMultipliers
-        or type(StatUtils.GetPlayerInstanceKey) ~= "function" then
+        or not StatsAPI
+        or not StatsAPI.stats
+        or not StatsAPI.stats.unifiedMultipliers
+        or type(StatsAPI.GetPlayerInstanceKey) ~= "function" then
         return false
     end
 
-    local unified = StatUtils.stats.unifiedMultipliers
-    local playerID = StatUtils:GetPlayerInstanceKey(player)
+    local unified = StatsAPI.stats.unifiedMultipliers
+    local playerID = StatsAPI:GetPlayerInstanceKey(player)
     local perPlayer = unified and unified[playerID]
     if type(perPlayer) ~= "table" then
         return false
@@ -1451,7 +1451,7 @@ end
 -- Render a single multiplier stat
 local function RenderMultiplierStat(statType, currentValue, totalMult, currentType, pos, alpha)
     if type(currentValue) ~= "number" or type(totalMult) ~= "number" then
-        StatUtils.printError(string.format("RenderMultiplierStat: currentValue and totalMult must be numbers, got %s and %s",
+        StatsAPI.printError(string.format("RenderMultiplierStat: currentValue and totalMult must be numbers, got %s and %s",
             type(currentValue), type(totalMult)))
         return
     end
@@ -1525,9 +1525,9 @@ local function RenderMultiplierStat(statType, currentValue, totalMult, currentTy
 end
 
 -- Render multiplier display for a player
-function StatUtils.stats.multiplierDisplay:RenderPlayer(player, renderIndex, hasBethanyParty)
+function StatsAPI.stats.multiplierDisplay:RenderPlayer(player, renderIndex, hasBethanyParty)
     self:InitPlayer(player)
-    local playerID = StatUtils:GetPlayerInstanceKey(player)
+    local playerID = StatsAPI:GetPlayerInstanceKey(player)
     local data = self.playerData[playerID]
 
     local vanillaChanged = SyncVanillaOnlyDisplayData(player, data)
@@ -1666,8 +1666,8 @@ function StatUtils.stats.multiplierDisplay:RenderPlayer(player, renderIndex, has
 end
 
 -- Render all players' multiplier displays
-function StatUtils.stats.multiplierDisplay:Render()
-    if StatUtils and StatUtils.IsDisplayEnabled and not StatUtils:IsDisplayEnabled() then
+function StatsAPI.stats.multiplierDisplay:Render()
+    if StatsAPI and StatsAPI.IsDisplayEnabled and not StatsAPI:IsDisplayEnabled() then
         return
     end
 
@@ -1684,65 +1684,65 @@ function StatUtils.stats.multiplierDisplay:Render()
     end
 
     if playerCount > 0 and not self.lastProcessedCount then
-        StatUtils.printDebug("Render() completed, processed " .. playerCount .. " players")
+        StatsAPI.printDebug("Render() completed, processed " .. playerCount .. " players")
         self.lastProcessedCount = playerCount
     end
 end
 
 -- Initialize the display system (registers render callback)
-function StatUtils.stats.multiplierDisplay:Initialize()
+function StatsAPI.stats.multiplierDisplay:Initialize()
     if not self.initialized then
         self.initialized = true
-        StatUtils.printDebug("Multiplier display system initialized!")
+        StatsAPI.printDebug("Multiplier display system initialized!")
 
-        StatUtils.mod:AddCallback(ModCallbacks.MC_POST_RENDER, function()
-            if StatUtils.stats and StatUtils.stats.multiplierDisplay then
-                StatUtils.stats.multiplierDisplay:Render()
+        StatsAPI.mod:AddCallback(ModCallbacks.MC_POST_RENDER, function()
+            if StatsAPI.stats and StatsAPI.stats.multiplierDisplay then
+                StatsAPI.stats.multiplierDisplay:Render()
             end
         end)
-        StatUtils.print("Render callback registered!")
+        StatsAPI.print("Render callback registered!")
     end
 end
 
 -- Reset all multiplier data for a new game
-function StatUtils.stats.multiplierDisplay:ResetForNewGame()
-    StatUtils.printDebug("Resetting multiplier display data for new game")
+function StatsAPI.stats.multiplierDisplay:ResetForNewGame()
+    StatsAPI.printDebug("Resetting multiplier display data for new game")
     self.playerData = {}
     self.lastProcessedCount = nil
-    StatUtils.printDebug("Multiplier display data reset completed")
+    StatsAPI.printDebug("Multiplier display data reset completed")
 end
 
 -- Force show multiplier display
-function StatUtils.stats.multiplierDisplay:ForceShow(player, duration)
+function StatsAPI.stats.multiplierDisplay:ForceShow(player, duration)
     if not player then return end
 
     self:InitPlayer(player)
-    local playerID = StatUtils:GetPlayerInstanceKey(player)
+    local playerID = StatsAPI:GetPlayerInstanceKey(player)
 
     self.playerData[playerID].displayStartFrame = Game():GetFrameCount()
     self.playerData[playerID].isDisplaying = true
 
-    StatUtils.printDebug("Force showing multiplier display for " .. (duration or MULTIPLIER_DISPLAY_DURATION) .. " frames")
+    StatsAPI.printDebug("Force showing multiplier display for " .. (duration or MULTIPLIER_DISPLAY_DURATION) .. " frames")
 end
 
 -- Legacy functions for backward compatibility (deprecated)
-function StatUtils.stats.multiplierDisplay:ShowDetailedMultipliers(player, statType, currentMult, description, itemID, updateDisplayOnly)
-    StatUtils.printDebug("ShowDetailedMultipliers is deprecated, use unifiedMultipliers:SetItemMultiplier instead")
+function StatsAPI.stats.multiplierDisplay:ShowDetailedMultipliers(player, statType, currentMult, description, itemID, updateDisplayOnly)
+    StatsAPI.printDebug("ShowDetailedMultipliers is deprecated, use unifiedMultipliers:SetItemMultiplier instead")
     return false
 end
 
-function StatUtils.stats.multiplierDisplay:SetMultiplier(player, statType, currentMult, totalMult)
-    StatUtils.printDebug("SetMultiplier is deprecated, use unifiedMultipliers:SetItemMultiplier instead")
+function StatsAPI.stats.multiplierDisplay:SetMultiplier(player, statType, currentMult, totalMult)
+    StatsAPI.printDebug("SetMultiplier is deprecated, use unifiedMultipliers:SetItemMultiplier instead")
     return false
 end
 
-function StatUtils.stats.multiplierDisplay:StoreMultiplierData(player, statType, currentMult, totalMult)
-    StatUtils.printDebug("StoreMultiplierData is deprecated, use unifiedMultipliers:SetItemMultiplier instead")
+function StatsAPI.stats.multiplierDisplay:StoreMultiplierData(player, statType, currentMult, totalMult)
+    StatsAPI.printDebug("StoreMultiplierData is deprecated, use unifiedMultipliers:SetItemMultiplier instead")
     return false
 end
 
-function StatUtils.stats.multiplierDisplay:ShowMultipliers(player, statType, currentMult, totalMult)
-    StatUtils.printDebug("ShowMultipliers is deprecated, use unifiedMultipliers:SetItemMultiplier instead")
+function StatsAPI.stats.multiplierDisplay:ShowMultipliers(player, statType, currentMult, totalMult)
+    StatsAPI.printDebug("ShowMultipliers is deprecated, use unifiedMultipliers:SetItemMultiplier instead")
     return false
 end
 
@@ -1751,11 +1751,11 @@ end
 -------------------------------------------------------------------------------
 
 -- Damage
-StatUtils.stats.damage = {}
+StatsAPI.stats.damage = {}
 
-function StatUtils.stats.damage.applyMultiplier(player, multiplier, minDamage, showDisplay)
+function StatsAPI.stats.damage.applyMultiplier(player, multiplier, minDamage, showDisplay)
     if not player then
-        StatUtils.printError("Player not found in StatUtils.stats.damage.applyMultiplier")
+        StatsAPI.printError("Player not found in StatsAPI.stats.damage.applyMultiplier")
         return
     end
 
@@ -1768,20 +1768,20 @@ function StatUtils.stats.damage.applyMultiplier(player, multiplier, minDamage, s
 
     player.Damage = newDamage
 
-    StatUtils.stats.damage.applyPoisonDamageMultiplier(player, multiplier)
+    StatsAPI.stats.damage.applyPoisonDamageMultiplier(player, multiplier)
 
     return newDamage
 end
 
-function StatUtils.stats.damage.applyMultiplierScaled(player, multiplier, minDamage, showDisplay)
+function StatsAPI.stats.damage.applyMultiplierScaled(player, multiplier, minDamage, showDisplay)
     if not player then
-        StatUtils.printError("Player not found in StatUtils.stats.damage.applyMultiplierScaled")
+        StatsAPI.printError("Player not found in StatsAPI.stats.damage.applyMultiplierScaled")
         return
     end
 
     local vanillaMultiplier = 1.0
-    if StatUtils.VanillaMultipliers and StatUtils.VanillaMultipliers.GetPlayerDamageMultiplier then
-        vanillaMultiplier = StatUtils.VanillaMultipliers:GetPlayerDamageMultiplier(player)
+    if StatsAPI.VanillaMultipliers and StatsAPI.VanillaMultipliers.GetPlayerDamageMultiplier then
+        vanillaMultiplier = StatsAPI.VanillaMultipliers:GetPlayerDamageMultiplier(player)
     end
 
     local scaledMultiplier = multiplier * vanillaMultiplier
@@ -1794,15 +1794,15 @@ function StatUtils.stats.damage.applyMultiplierScaled(player, multiplier, minDam
 
     player.Damage = newDamage
 
-    StatUtils.stats.damage.applyPoisonDamageMultiplier(player, scaledMultiplier)
+    StatsAPI.stats.damage.applyPoisonDamageMultiplier(player, scaledMultiplier)
 
-    StatUtils.printDebug(string.format("[Damage] MultiplierScaled: %.2fx * %.2fx (vanilla) = %.2fx -> Total: %.2f",
+    StatsAPI.printDebug(string.format("[Damage] MultiplierScaled: %.2fx * %.2fx (vanilla) = %.2fx -> Total: %.2f",
         multiplier, vanillaMultiplier, scaledMultiplier, newDamage))
 
     return newDamage, scaledMultiplier
 end
 
-function StatUtils.stats.damage.applyAddition(player, addition, minDamage)
+function StatsAPI.stats.damage.applyAddition(player, addition, minDamage)
     if not player then return end
 
     local baseDamage = player.Damage
@@ -1814,17 +1814,17 @@ function StatUtils.stats.damage.applyAddition(player, addition, minDamage)
 
     player.Damage = newDamage
 
-    StatUtils.stats.damage.applyPoisonDamageAddition(player, addition)
+    StatsAPI.stats.damage.applyPoisonDamageAddition(player, addition)
 
     return newDamage
 end
 
-function StatUtils.stats.damage.applyAdditionScaled(player, addition, minDamage)
+function StatsAPI.stats.damage.applyAdditionScaled(player, addition, minDamage)
     if not player then return end
 
     local vanillaMultiplier = 1.0
-    if StatUtils.VanillaMultipliers and StatUtils.VanillaMultipliers.GetPlayerDamageMultiplier then
-        vanillaMultiplier = StatUtils.VanillaMultipliers:GetPlayerDamageMultiplier(player)
+    if StatsAPI.VanillaMultipliers and StatsAPI.VanillaMultipliers.GetPlayerDamageMultiplier then
+        vanillaMultiplier = StatsAPI.VanillaMultipliers:GetPlayerDamageMultiplier(player)
     end
 
     local scaledAddition = addition * vanillaMultiplier
@@ -1837,18 +1837,18 @@ function StatUtils.stats.damage.applyAdditionScaled(player, addition, minDamage)
 
     player.Damage = newDamage
 
-    StatUtils.stats.damage.applyPoisonDamageAddition(player, scaledAddition)
+    StatsAPI.stats.damage.applyPoisonDamageAddition(player, scaledAddition)
 
-    StatUtils.printDebug(string.format("[Damage] AdditionScaled: %.2f * %.2fx (vanilla) = %.2f -> Total: %.2f",
+    StatsAPI.printDebug(string.format("[Damage] AdditionScaled: %.2f * %.2fx (vanilla) = %.2f -> Total: %.2f",
         addition, vanillaMultiplier, scaledAddition, newDamage))
 
     return newDamage, scaledAddition
 end
 
-function StatUtils.stats.damage.applyPoisonDamageMultiplier(player, multiplier)
+function StatsAPI.stats.damage.applyPoisonDamageMultiplier(player, multiplier)
     if not player then return end
 
-    if not StatUtils.stats.damage.supportsTearPoisonAPI(player) then
+    if not StatsAPI.stats.damage.supportsTearPoisonAPI(player) then
         return
     end
 
@@ -1871,10 +1871,10 @@ function StatUtils.stats.damage.applyPoisonDamageMultiplier(player, multiplier)
     return newPoisonDamage
 end
 
-function StatUtils.stats.damage.applyPoisonDamageAddition(player, addition)
+function StatsAPI.stats.damage.applyPoisonDamageAddition(player, addition)
     if not player then return end
 
-    if not StatUtils.stats.damage.supportsTearPoisonAPI(player) then
+    if not StatsAPI.stats.damage.supportsTearPoisonAPI(player) then
         return
     end
 
@@ -1892,9 +1892,9 @@ function StatUtils.stats.damage.applyPoisonDamageAddition(player, addition)
     return newPoisonDamage
 end
 
-function StatUtils.stats.damage.applyPoisonDamageCombined(player, multiplier, addition)
+function StatsAPI.stats.damage.applyPoisonDamageCombined(player, multiplier, addition)
     if not player then return end
-    if not StatUtils.stats.damage.supportsTearPoisonAPI(player) then
+    if not StatsAPI.stats.damage.supportsTearPoisonAPI(player) then
         return
     end
 
@@ -1916,14 +1916,14 @@ function StatUtils.stats.damage.applyPoisonDamageCombined(player, multiplier, ad
     return newPoisonDamage
 end
 
-function StatUtils.stats.damage.supportsTearPoisonAPI(player)
+function StatsAPI.stats.damage.supportsTearPoisonAPI(player)
     return player and type(player.GetTearPoisonDamage) == "function" and type(player.SetTearPoisonDamage) == "function"
 end
 
 -- Tears
-StatUtils.stats.tears = {}
+StatsAPI.stats.tears = {}
 
-function StatUtils.stats.tears.calculateMaxFireDelay(baseFireDelay, multiplier, minFireDelay)
+function StatsAPI.stats.tears.calculateMaxFireDelay(baseFireDelay, multiplier, minFireDelay)
     if not baseFireDelay or not multiplier then return baseFireDelay end
 
     local baseSPS = 30 / (baseFireDelay + 1)
@@ -1933,15 +1933,15 @@ function StatUtils.stats.tears.calculateMaxFireDelay(baseFireDelay, multiplier, 
     return newMaxFireDelay
 end
 
-function StatUtils.stats.tears.applyMultiplier(player, multiplier, minFireDelay, showDisplay)
+function StatsAPI.stats.tears.applyMultiplier(player, multiplier, minFireDelay, showDisplay)
     if not player then return end
 
     local baseFireDelay = player.MaxFireDelay
     local baseSPS = 30 / (baseFireDelay + 1)
-    local newFireDelay = StatUtils.stats.tears.calculateMaxFireDelay(baseFireDelay, multiplier, nil)
+    local newFireDelay = StatsAPI.stats.tears.calculateMaxFireDelay(baseFireDelay, multiplier, nil)
     local newSPS = 30 / (newFireDelay + 1)
 
-    StatUtils.printDebug(string.format("[Tears] Multiplier apply: baseFD=%.4f baseSPS=%.4f mult=%.4f -> newFD=%.4f newSPS=%.4f",
+    StatsAPI.printDebug(string.format("[Tears] Multiplier apply: baseFD=%.4f baseSPS=%.4f mult=%.4f -> newFD=%.4f newSPS=%.4f",
         baseFireDelay, baseSPS, multiplier, newFireDelay, newSPS))
 
     player.MaxFireDelay = newFireDelay
@@ -1949,21 +1949,21 @@ function StatUtils.stats.tears.applyMultiplier(player, multiplier, minFireDelay,
     return newFireDelay
 end
 
-function StatUtils.stats.tears.applyMultiplierScaled(player, multiplier, minFireDelay, showDisplay)
+function StatsAPI.stats.tears.applyMultiplierScaled(player, multiplier, minFireDelay, showDisplay)
     if not player then return end
 
     local vanillaMultiplier = 1.0
-    if StatUtils.VanillaMultipliers and StatUtils.VanillaMultipliers.GetPlayerFireRateMultiplier then
-        vanillaMultiplier = StatUtils.VanillaMultipliers:GetPlayerFireRateMultiplier(player)
+    if StatsAPI.VanillaMultipliers and StatsAPI.VanillaMultipliers.GetPlayerFireRateMultiplier then
+        vanillaMultiplier = StatsAPI.VanillaMultipliers:GetPlayerFireRateMultiplier(player)
     end
 
     local scaledMultiplier = multiplier * vanillaMultiplier
     local baseFireDelay = player.MaxFireDelay
     local baseSPS = 30 / (baseFireDelay + 1)
-    local newFireDelay = StatUtils.stats.tears.calculateMaxFireDelay(baseFireDelay, scaledMultiplier, nil)
+    local newFireDelay = StatsAPI.stats.tears.calculateMaxFireDelay(baseFireDelay, scaledMultiplier, nil)
     local newSPS = 30 / (newFireDelay + 1)
 
-    StatUtils.printDebug(string.format("[Tears] MultiplierScaled: baseFD=%.4f baseSPS=%.4f mult=%.4f * %.2fx = %.4f -> newFD=%.4f newSPS=%.4f",
+    StatsAPI.printDebug(string.format("[Tears] MultiplierScaled: baseFD=%.4f baseSPS=%.4f mult=%.4f * %.2fx = %.4f -> newFD=%.4f newSPS=%.4f",
         baseFireDelay, baseSPS, multiplier, vanillaMultiplier, scaledMultiplier, newFireDelay, newSPS))
 
     player.MaxFireDelay = newFireDelay
@@ -1971,7 +1971,7 @@ function StatUtils.stats.tears.applyMultiplierScaled(player, multiplier, minFire
     return newFireDelay, scaledMultiplier
 end
 
-function StatUtils.stats.tears.applyAddition(player, addition, minFireDelay)
+function StatsAPI.stats.tears.applyAddition(player, addition, minFireDelay)
     if not player then return end
 
     local baseFireDelay = player.MaxFireDelay
@@ -1980,7 +1980,7 @@ function StatUtils.stats.tears.applyAddition(player, addition, minFireDelay)
     local newMaxFireDelay = (30 / targetSPS) - 1
     local newSPS = 30 / (newMaxFireDelay + 1)
 
-    StatUtils.printDebug(string.format("[Tears] Addition apply: baseFD=%.4f baseSPS=%.4f addSPS=%+.4f -> newFD=%.4f newSPS=%.4f",
+    StatsAPI.printDebug(string.format("[Tears] Addition apply: baseFD=%.4f baseSPS=%.4f addSPS=%+.4f -> newFD=%.4f newSPS=%.4f",
         baseFireDelay, baseSPS, addition, newMaxFireDelay, newSPS))
 
     player.MaxFireDelay = newMaxFireDelay
@@ -1988,12 +1988,12 @@ function StatUtils.stats.tears.applyAddition(player, addition, minFireDelay)
     return newMaxFireDelay
 end
 
-function StatUtils.stats.tears.applyAdditionScaled(player, addition, minFireDelay)
+function StatsAPI.stats.tears.applyAdditionScaled(player, addition, minFireDelay)
     if not player then return end
 
     local vanillaMultiplier = 1.0
-    if StatUtils.VanillaMultipliers and StatUtils.VanillaMultipliers.GetPlayerFireRateMultiplier then
-        vanillaMultiplier = StatUtils.VanillaMultipliers:GetPlayerFireRateMultiplier(player)
+    if StatsAPI.VanillaMultipliers and StatsAPI.VanillaMultipliers.GetPlayerFireRateMultiplier then
+        vanillaMultiplier = StatsAPI.VanillaMultipliers:GetPlayerFireRateMultiplier(player)
     end
 
     local scaledAddition = addition * vanillaMultiplier
@@ -2003,7 +2003,7 @@ function StatUtils.stats.tears.applyAdditionScaled(player, addition, minFireDela
     local newMaxFireDelay = (30 / targetSPS) - 1
     local newSPS = 30 / (newMaxFireDelay + 1)
 
-    StatUtils.printDebug(string.format("[Tears] AdditionScaled: baseFD=%.4f baseSPS=%.4f addSPS=%+.4f * %.2fx = %+.4f -> newFD=%.4f newSPS=%.4f",
+    StatsAPI.printDebug(string.format("[Tears] AdditionScaled: baseFD=%.4f baseSPS=%.4f addSPS=%+.4f * %.2fx = %+.4f -> newFD=%.4f newSPS=%.4f",
         baseFireDelay, baseSPS, addition, vanillaMultiplier, scaledAddition, newMaxFireDelay, newSPS))
 
     player.MaxFireDelay = newMaxFireDelay
@@ -2012,9 +2012,9 @@ function StatUtils.stats.tears.applyAdditionScaled(player, addition, minFireDela
 end
 
 -- Speed
-StatUtils.stats.speed = {}
+StatsAPI.stats.speed = {}
 
-function StatUtils.stats.speed.applyMultiplier(player, multiplier, minSpeed, showDisplay)
+function StatsAPI.stats.speed.applyMultiplier(player, multiplier, minSpeed, showDisplay)
     if not player then return end
 
     local baseSpeed = player.MoveSpeed
@@ -2029,7 +2029,7 @@ function StatUtils.stats.speed.applyMultiplier(player, multiplier, minSpeed, sho
     return newSpeed
 end
 
-function StatUtils.stats.speed.applyMultiplierScaled(player, multiplier, minSpeed, showDisplay)
+function StatsAPI.stats.speed.applyMultiplierScaled(player, multiplier, minSpeed, showDisplay)
     if not player then return end
 
     local vanillaMultiplier = 1.0
@@ -2043,13 +2043,13 @@ function StatUtils.stats.speed.applyMultiplierScaled(player, multiplier, minSpee
 
     player.MoveSpeed = newSpeed
 
-    StatUtils.printDebug(string.format("[Speed] MultiplierScaled: %.2fx * %.2fx = %.2fx -> Total: %.2f",
+    StatsAPI.printDebug(string.format("[Speed] MultiplierScaled: %.2fx * %.2fx = %.2fx -> Total: %.2f",
         multiplier, vanillaMultiplier, scaledMultiplier, newSpeed))
 
     return newSpeed, scaledMultiplier
 end
 
-function StatUtils.stats.speed.applyAddition(player, addition, minSpeed)
+function StatsAPI.stats.speed.applyAddition(player, addition, minSpeed)
     if not player then return end
 
     local baseSpeed = player.MoveSpeed
@@ -2064,7 +2064,7 @@ function StatUtils.stats.speed.applyAddition(player, addition, minSpeed)
     return newSpeed
 end
 
-function StatUtils.stats.speed.applyAdditionScaled(player, addition, minSpeed)
+function StatsAPI.stats.speed.applyAdditionScaled(player, addition, minSpeed)
     if not player then return end
 
     local vanillaMultiplier = 1.0
@@ -2078,16 +2078,16 @@ function StatUtils.stats.speed.applyAdditionScaled(player, addition, minSpeed)
 
     player.MoveSpeed = newSpeed
 
-    StatUtils.printDebug(string.format("[Speed] AdditionScaled: %.2f * %.2fx = %.2f -> Total: %.2f",
+    StatsAPI.printDebug(string.format("[Speed] AdditionScaled: %.2f * %.2fx = %.2f -> Total: %.2f",
         addition, vanillaMultiplier, scaledAddition, newSpeed))
 
     return newSpeed, scaledAddition
 end
 
 -- Range
-StatUtils.stats.range = {}
+StatsAPI.stats.range = {}
 
-function StatUtils.stats.range.applyMultiplier(player, multiplier, minRange, showDisplay)
+function StatsAPI.stats.range.applyMultiplier(player, multiplier, minRange, showDisplay)
     if not player then return end
 
     local baseRange = player.TearRange
@@ -2102,7 +2102,7 @@ function StatUtils.stats.range.applyMultiplier(player, multiplier, minRange, sho
     return newRange
 end
 
-function StatUtils.stats.range.applyMultiplierScaled(player, multiplier, minRange, showDisplay)
+function StatsAPI.stats.range.applyMultiplierScaled(player, multiplier, minRange, showDisplay)
     if not player then return end
 
     local vanillaMultiplier = 1.0
@@ -2116,13 +2116,13 @@ function StatUtils.stats.range.applyMultiplierScaled(player, multiplier, minRang
 
     player.TearRange = newRange
 
-    StatUtils.printDebug(string.format("[Range] MultiplierScaled: %.2fx * %.2fx = %.2fx -> Total: %.2f",
+    StatsAPI.printDebug(string.format("[Range] MultiplierScaled: %.2fx * %.2fx = %.2fx -> Total: %.2f",
         multiplier, vanillaMultiplier, scaledMultiplier, newRange))
 
     return newRange, scaledMultiplier
 end
 
-function StatUtils.stats.range.applyAddition(player, addition, minRange)
+function StatsAPI.stats.range.applyAddition(player, addition, minRange)
     if not player then return end
 
     local baseRange = player.TearRange
@@ -2137,7 +2137,7 @@ function StatUtils.stats.range.applyAddition(player, addition, minRange)
     return newRange
 end
 
-function StatUtils.stats.range.applyAdditionScaled(player, addition, minRange)
+function StatsAPI.stats.range.applyAdditionScaled(player, addition, minRange)
     if not player then return end
 
     local vanillaMultiplier = 1.0
@@ -2151,16 +2151,16 @@ function StatUtils.stats.range.applyAdditionScaled(player, addition, minRange)
 
     player.TearRange = newRange
 
-    StatUtils.printDebug(string.format("[Range] AdditionScaled: %.2f * %.2fx = %.2f -> Total: %.2f",
+    StatsAPI.printDebug(string.format("[Range] AdditionScaled: %.2f * %.2fx = %.2f -> Total: %.2f",
         addition, vanillaMultiplier, scaledAddition, newRange))
 
     return newRange, scaledAddition
 end
 
 -- Luck
-StatUtils.stats.luck = {}
+StatsAPI.stats.luck = {}
 
-function StatUtils.stats.luck.applyMultiplier(player, multiplier, minLuck, showDisplay)
+function StatsAPI.stats.luck.applyMultiplier(player, multiplier, minLuck, showDisplay)
     if not player then return end
 
     local baseLuck = player.Luck
@@ -2180,7 +2180,7 @@ function StatUtils.stats.luck.applyMultiplier(player, multiplier, minLuck, showD
     return newLuck
 end
 
-function StatUtils.stats.luck.applyMultiplierScaled(player, multiplier, minLuck, showDisplay)
+function StatsAPI.stats.luck.applyMultiplierScaled(player, multiplier, minLuck, showDisplay)
     if not player then return end
 
     local vanillaMultiplier = 1.0
@@ -2199,13 +2199,13 @@ function StatUtils.stats.luck.applyMultiplierScaled(player, multiplier, minLuck,
 
     player.Luck = newLuck
 
-    StatUtils.printDebug(string.format("[Luck] MultiplierScaled: %.2fx * %.2fx = %.2fx -> Total: %.2f",
+    StatsAPI.printDebug(string.format("[Luck] MultiplierScaled: %.2fx * %.2fx = %.2fx -> Total: %.2f",
         multiplier, vanillaMultiplier, scaledMultiplier, newLuck))
 
     return newLuck, scaledMultiplier
 end
 
-function StatUtils.stats.luck.applyAddition(player, addition, minLuck)
+function StatsAPI.stats.luck.applyAddition(player, addition, minLuck)
     if not player then return end
 
     local baseLuck = player.Luck
@@ -2220,7 +2220,7 @@ function StatUtils.stats.luck.applyAddition(player, addition, minLuck)
     return newLuck
 end
 
-function StatUtils.stats.luck.applyAdditionScaled(player, addition, minLuck)
+function StatsAPI.stats.luck.applyAdditionScaled(player, addition, minLuck)
     if not player then return end
 
     local vanillaMultiplier = 1.0
@@ -2234,16 +2234,16 @@ function StatUtils.stats.luck.applyAdditionScaled(player, addition, minLuck)
 
     player.Luck = newLuck
 
-    StatUtils.printDebug(string.format("[Luck] AdditionScaled: %.2f * %.2fx = %.2f -> Total: %.2f",
+    StatsAPI.printDebug(string.format("[Luck] AdditionScaled: %.2f * %.2fx = %.2f -> Total: %.2f",
         addition, vanillaMultiplier, scaledAddition, newLuck))
 
     return newLuck, scaledAddition
 end
 
 -- Shot Speed
-StatUtils.stats.shotSpeed = {}
+StatsAPI.stats.shotSpeed = {}
 
-function StatUtils.stats.shotSpeed.applyMultiplier(player, multiplier, minShotSpeed, showDisplay)
+function StatsAPI.stats.shotSpeed.applyMultiplier(player, multiplier, minShotSpeed, showDisplay)
     if not player then return end
 
     local baseShotSpeed = player.ShotSpeed
@@ -2258,7 +2258,7 @@ function StatUtils.stats.shotSpeed.applyMultiplier(player, multiplier, minShotSp
     return newShotSpeed
 end
 
-function StatUtils.stats.shotSpeed.applyMultiplierScaled(player, multiplier, minShotSpeed, showDisplay)
+function StatsAPI.stats.shotSpeed.applyMultiplierScaled(player, multiplier, minShotSpeed, showDisplay)
     if not player then return end
 
     local vanillaMultiplier = 1.0
@@ -2272,13 +2272,13 @@ function StatUtils.stats.shotSpeed.applyMultiplierScaled(player, multiplier, min
 
     player.ShotSpeed = newShotSpeed
 
-    StatUtils.printDebug(string.format("[ShotSpeed] MultiplierScaled: %.2fx * %.2fx = %.2fx -> Total: %.2f",
+    StatsAPI.printDebug(string.format("[ShotSpeed] MultiplierScaled: %.2fx * %.2fx = %.2fx -> Total: %.2f",
         multiplier, vanillaMultiplier, scaledMultiplier, newShotSpeed))
 
     return newShotSpeed, scaledMultiplier
 end
 
-function StatUtils.stats.shotSpeed.applyAddition(player, addition, minShotSpeed)
+function StatsAPI.stats.shotSpeed.applyAddition(player, addition, minShotSpeed)
     if not player then return end
 
     local baseShotSpeed = player.ShotSpeed
@@ -2293,7 +2293,7 @@ function StatUtils.stats.shotSpeed.applyAddition(player, addition, minShotSpeed)
     return newShotSpeed
 end
 
-function StatUtils.stats.shotSpeed.applyAdditionScaled(player, addition, minShotSpeed)
+function StatsAPI.stats.shotSpeed.applyAdditionScaled(player, addition, minShotSpeed)
     if not player then return end
 
     local vanillaMultiplier = 1.0
@@ -2307,7 +2307,7 @@ function StatUtils.stats.shotSpeed.applyAdditionScaled(player, addition, minShot
 
     player.ShotSpeed = newShotSpeed
 
-    StatUtils.printDebug(string.format("[ShotSpeed] AdditionScaled: %.2f * %.2fx = %.2f -> Total: %.2f",
+    StatsAPI.printDebug(string.format("[ShotSpeed] AdditionScaled: %.2f * %.2fx = %.2f -> Total: %.2f",
         addition, vanillaMultiplier, scaledAddition, newShotSpeed))
 
     return newShotSpeed, scaledAddition
@@ -2316,39 +2316,39 @@ end
 -------------------------------------------------------------------------------
 -- Unified Stat Apply Functions
 -------------------------------------------------------------------------------
-StatUtils.stats.unified = {}
+StatsAPI.stats.unified = {}
 
-function StatUtils.stats.unified.applyMultiplierToAll(player, multiplier, minStats, showDisplay)
+function StatsAPI.stats.unified.applyMultiplierToAll(player, multiplier, minStats, showDisplay)
     if not player then return end
 
-    minStats = minStats or StatUtils.stats.BASE_STATS
+    minStats = minStats or StatsAPI.stats.BASE_STATS
 
-    StatUtils.stats.damage.applyMultiplier(player, multiplier, minStats.damage * 0.4, showDisplay)
-    StatUtils.stats.tears.applyMultiplier(player, multiplier, nil, showDisplay)
-    StatUtils.stats.speed.applyMultiplier(player, multiplier, minStats.speed * 0.4, showDisplay)
-    StatUtils.stats.range.applyMultiplier(player, multiplier, minStats.range * 0.4, showDisplay)
-    StatUtils.stats.luck.applyMultiplier(player, multiplier, minStats.luck * 0.4, showDisplay)
-    StatUtils.stats.shotSpeed.applyMultiplier(player, multiplier, minStats.shotSpeed * 0.4, showDisplay)
+    StatsAPI.stats.damage.applyMultiplier(player, multiplier, minStats.damage * 0.4, showDisplay)
+    StatsAPI.stats.tears.applyMultiplier(player, multiplier, nil, showDisplay)
+    StatsAPI.stats.speed.applyMultiplier(player, multiplier, minStats.speed * 0.4, showDisplay)
+    StatsAPI.stats.range.applyMultiplier(player, multiplier, minStats.range * 0.4, showDisplay)
+    StatsAPI.stats.luck.applyMultiplier(player, multiplier, minStats.luck * 0.4, showDisplay)
+    StatsAPI.stats.shotSpeed.applyMultiplier(player, multiplier, minStats.shotSpeed * 0.4, showDisplay)
 
     return true
 end
 
-function StatUtils.stats.unified.applyAdditionToAll(player, addition, minStats)
+function StatsAPI.stats.unified.applyAdditionToAll(player, addition, minStats)
     if not player then return end
 
-    minStats = minStats or StatUtils.stats.BASE_STATS
+    minStats = minStats or StatsAPI.stats.BASE_STATS
 
-    StatUtils.stats.damage.applyAddition(player, addition, minStats.damage * 0.4)
-    StatUtils.stats.tears.applyAddition(player, addition, nil)
-    StatUtils.stats.speed.applyAddition(player, addition, minStats.speed * 0.4)
-    StatUtils.stats.range.applyAddition(player, addition, minStats.range * 0.4)
-    StatUtils.stats.luck.applyAddition(player, addition, minStats.luck * 0.4)
-    StatUtils.stats.shotSpeed.applyAddition(player, addition, minStats.shotSpeed * 0.4)
+    StatsAPI.stats.damage.applyAddition(player, addition, minStats.damage * 0.4)
+    StatsAPI.stats.tears.applyAddition(player, addition, nil)
+    StatsAPI.stats.speed.applyAddition(player, addition, minStats.speed * 0.4)
+    StatsAPI.stats.range.applyAddition(player, addition, minStats.range * 0.4)
+    StatsAPI.stats.luck.applyAddition(player, addition, minStats.luck * 0.4)
+    StatsAPI.stats.shotSpeed.applyAddition(player, addition, minStats.shotSpeed * 0.4)
 
     return true
 end
 
-function StatUtils.stats.unified.updateCache(player, cacheFlag)
+function StatsAPI.stats.unified.updateCache(player, cacheFlag)
     if not player then return end
 
     if cacheFlag then
@@ -2361,47 +2361,47 @@ function StatUtils.stats.unified.updateCache(player, cacheFlag)
 end
 
 -- Convenience functions
-StatUtils.stats.applyToAll = function(player, statType, multiplier, minValue, showDisplay)
+StatsAPI.stats.applyToAll = function(player, statType, multiplier, minValue, showDisplay)
     if not player or not statType then return false end
 
     if statType == "damage" then
-        return StatUtils.stats.damage.applyMultiplier(player, multiplier, minValue, showDisplay)
+        return StatsAPI.stats.damage.applyMultiplier(player, multiplier, minValue, showDisplay)
     elseif statType == "tears" then
-        return StatUtils.stats.tears.applyMultiplier(player, multiplier, minValue, showDisplay)
+        return StatsAPI.stats.tears.applyMultiplier(player, multiplier, minValue, showDisplay)
     elseif statType == "speed" then
-        return StatUtils.stats.speed.applyMultiplier(player, multiplier, minValue, showDisplay)
+        return StatsAPI.stats.speed.applyMultiplier(player, multiplier, minValue, showDisplay)
     elseif statType == "range" then
-        return StatUtils.stats.range.applyMultiplier(player, multiplier, minValue, showDisplay)
+        return StatsAPI.stats.range.applyMultiplier(player, multiplier, minValue, showDisplay)
     elseif statType == "luck" then
-        return StatUtils.stats.luck.applyMultiplier(player, multiplier, minValue, showDisplay)
+        return StatsAPI.stats.luck.applyMultiplier(player, multiplier, minValue, showDisplay)
     elseif statType == "shotSpeed" then
-        return StatUtils.stats.shotSpeed.applyMultiplier(player, multiplier, minValue, showDisplay)
+        return StatsAPI.stats.shotSpeed.applyMultiplier(player, multiplier, minValue, showDisplay)
     end
 
     return false
 end
 
-StatUtils.stats.addToAll = function(player, statType, addition, minValue)
+StatsAPI.stats.addToAll = function(player, statType, addition, minValue)
     if not player or not statType then return false end
 
     if statType == "damage" then
-        return StatUtils.stats.damage.applyAddition(player, addition, minValue)
+        return StatsAPI.stats.damage.applyAddition(player, addition, minValue)
     elseif statType == "tears" then
-        return StatUtils.stats.tears.applyAddition(player, addition, minValue)
+        return StatsAPI.stats.tears.applyAddition(player, addition, minValue)
     elseif statType == "speed" then
-        return StatUtils.stats.speed.applyAddition(player, addition, minValue)
+        return StatsAPI.stats.speed.applyAddition(player, addition, minValue)
     elseif statType == "range" then
-        return StatUtils.stats.range.applyAddition(player, addition, minValue)
+        return StatsAPI.stats.range.applyAddition(player, addition, minValue)
     elseif statType == "luck" then
-        return StatUtils.stats.luck.applyAddition(player, addition, minValue)
+        return StatsAPI.stats.luck.applyAddition(player, addition, minValue)
     elseif statType == "shotSpeed" then
-        return StatUtils.stats.shotSpeed.applyAddition(player, addition, minValue)
+        return StatsAPI.stats.shotSpeed.applyAddition(player, addition, minValue)
     end
 
     return false
 end
 
-StatUtils.stats.getCurrentStats = function(player)
+StatsAPI.stats.getCurrentStats = function(player)
     if not player then return {} end
 
     return {
@@ -2414,15 +2414,15 @@ StatUtils.stats.getCurrentStats = function(player)
     }
 end
 
-StatUtils.stats.getBaseStats = function()
-    return StatUtils.stats.BASE_STATS
+StatsAPI.stats.getBaseStats = function()
+    return StatsAPI.stats.BASE_STATS
 end
 
 -- Apply stat multiplier to actual player stat
-function StatUtils.stats.unifiedMultipliers:ApplyStatMultiplier(player, statType, totalMultiplier)
+function StatsAPI.stats.unifiedMultipliers:ApplyStatMultiplier(player, statType, totalMultiplier)
     if not player or not statType or not totalMultiplier then return end
 
-    StatUtils.printDebug(string.format("Applying %s multiplier %.2fx to player", statType, totalMultiplier))
+    StatsAPI.printDebug(string.format("Applying %s multiplier %.2fx to player", statType, totalMultiplier))
 
     local originalValues = {
         Tears = player.MaxFireDelay,
@@ -2433,21 +2433,21 @@ function StatUtils.stats.unifiedMultipliers:ApplyStatMultiplier(player, statType
         ShotSpeed = player.ShotSpeed
     }
 
-    StatUtils.printDebug(string.format("Original values - Tears: %.2f, Damage: %.2f, Range: %.2f, Luck: %.2f, Speed: %.2f, ShotSpeed: %.2f",
+    StatsAPI.printDebug(string.format("Original values - Tears: %.2f, Damage: %.2f, Range: %.2f, Luck: %.2f, Speed: %.2f, ShotSpeed: %.2f",
         originalValues.Tears, originalValues.Damage, originalValues.Range, originalValues.Luck, originalValues.Speed, originalValues.ShotSpeed))
 
     if statType == "Tears" then
-        StatUtils.stats.tears.applyMultiplier(player, totalMultiplier, nil, false)
+        StatsAPI.stats.tears.applyMultiplier(player, totalMultiplier, nil, false)
     elseif statType == "Damage" then
-        StatUtils.stats.damage.applyMultiplier(player, totalMultiplier, 0.1, false)
+        StatsAPI.stats.damage.applyMultiplier(player, totalMultiplier, 0.1, false)
     elseif statType == "Range" then
-        StatUtils.stats.range.applyMultiplier(player, totalMultiplier, 0.1, false)
+        StatsAPI.stats.range.applyMultiplier(player, totalMultiplier, 0.1, false)
     elseif statType == "Luck" then
-        StatUtils.stats.luck.applyMultiplier(player, totalMultiplier, 0.1, false)
+        StatsAPI.stats.luck.applyMultiplier(player, totalMultiplier, 0.1, false)
     elseif statType == "Speed" then
-        StatUtils.stats.speed.applyMultiplier(player, totalMultiplier, 0.1, false)
+        StatsAPI.stats.speed.applyMultiplier(player, totalMultiplier, 0.1, false)
     elseif statType == "ShotSpeed" then
-        StatUtils.stats.shotSpeed.applyMultiplier(player, totalMultiplier, 0.1, false)
+        StatsAPI.stats.shotSpeed.applyMultiplier(player, totalMultiplier, 0.1, false)
     end
 
     player:AddCacheFlags(CacheFlag.CACHE_ALL)
@@ -2462,45 +2462,45 @@ function StatUtils.stats.unifiedMultipliers:ApplyStatMultiplier(player, statType
         ShotSpeed = player.ShotSpeed
     }
 
-    StatUtils.printDebug(string.format("New values - Tears: %.2f, Damage: %.2f, Range: %.2f, Luck: %.2f, Speed: %.2f, ShotSpeed: %.2f",
+    StatsAPI.printDebug(string.format("New values - Tears: %.2f, Damage: %.2f, Range: %.2f, Luck: %.2f, Speed: %.2f, ShotSpeed: %.2f",
         newValues.Tears, newValues.Damage, newValues.Range, newValues.Luck, newValues.Speed, newValues.ShotSpeed))
 
     if newValues[statType] == originalValues[statType] then
-        StatUtils.printDebug(string.format("WARNING: %s value did not change, forcing direct update", statType))
+        StatsAPI.printDebug(string.format("WARNING: %s value did not change, forcing direct update", statType))
 
         if statType == "Tears" then
             local baseSPS = 30 / (originalValues.Tears + 1)
             local targetSPS = baseSPS * totalMultiplier
             local newFireDelay = (30 / targetSPS) - 1
             player.MaxFireDelay = newFireDelay
-            StatUtils.printDebug(string.format("Direct update: MaxFireDelay %.2f -> %.2f", originalValues.Tears, newFireDelay))
+            StatsAPI.printDebug(string.format("Direct update: MaxFireDelay %.2f -> %.2f", originalValues.Tears, newFireDelay))
         elseif statType == "Damage" then
             local newDamage = originalValues.Damage * totalMultiplier
             player.Damage = newDamage
-            StatUtils.printDebug(string.format("Direct update: Damage %.2f -> %.2f", originalValues.Damage, newDamage))
+            StatsAPI.printDebug(string.format("Direct update: Damage %.2f -> %.2f", originalValues.Damage, newDamage))
         elseif statType == "Range" then
             local newRange = originalValues.Range * totalMultiplier
             player.TearRange = newRange
-            StatUtils.printDebug(string.format("Direct update: Range %.2f -> %.2f", originalValues.Range, newRange))
+            StatsAPI.printDebug(string.format("Direct update: Range %.2f -> %.2f", originalValues.Range, newRange))
         elseif statType == "Luck" then
             local newLuck = originalValues.Luck * totalMultiplier
             player.Luck = newLuck
-            StatUtils.printDebug(string.format("Direct update: Luck %.2f -> %.2f", originalValues.Luck, newLuck))
+            StatsAPI.printDebug(string.format("Direct update: Luck %.2f -> %.2f", originalValues.Luck, newLuck))
         elseif statType == "Speed" then
             local newSpeed = originalValues.Speed * totalMultiplier
             player.MoveSpeed = newSpeed
-            StatUtils.printDebug(string.format("Direct update: Speed %.2f -> %.2f", originalValues.Speed, newSpeed))
+            StatsAPI.printDebug(string.format("Direct update: Speed %.2f -> %.2f", originalValues.Speed, newSpeed))
         elseif statType == "ShotSpeed" then
             local newShotSpeed = originalValues.ShotSpeed * totalMultiplier
             player.ShotSpeed = newShotSpeed
-            StatUtils.printDebug(string.format("Direct update: ShotSpeed %.2f -> %.2f", originalValues.ShotSpeed, newShotSpeed))
+            StatsAPI.printDebug(string.format("Direct update: ShotSpeed %.2f -> %.2f", originalValues.ShotSpeed, newShotSpeed))
         end
 
         player:AddCacheFlags(CacheFlag.CACHE_ALL)
         player:EvaluateItems()
     end
 
-    StatUtils.printDebug(string.format("Applied %s multiplier %.2fx and updated cache", statType, totalMultiplier))
+    StatsAPI.printDebug(string.format("Applied %s multiplier %.2fx and updated cache", statType, totalMultiplier))
 end
 
 -------------------------------------------------------------------------------
@@ -2516,14 +2516,14 @@ do
         [CacheFlag.CACHE_SHOTSPEED] = "ShotSpeed"
     }
 
-    function StatUtils.stats.unifiedMultipliers:OnEvaluateCache(player, cacheFlag)
+    function StatsAPI.stats.unifiedMultipliers:OnEvaluateCache(player, cacheFlag)
         if not player or not cacheFlag then return end
         local statType = CACHE_FLAG_TO_STAT[cacheFlag]
         if not statType then return end
         self._isEvaluatingCache = true
 
         self:InitPlayer(player)
-        local playerID = StatUtils:GetPlayerInstanceKey(player)
+        local playerID = StatsAPI:GetPlayerInstanceKey(player)
         local total = 1.0
         if self[playerID]
             and self[playerID].statMultipliers
@@ -2532,58 +2532,58 @@ do
             total = self[playerID].statMultipliers[statType].totalApply
         end
 
-        StatUtils.printDebug(string.format("[Unified] Evaluating %s cache: applying pure total %.2fx", statType, total))
+        StatsAPI.printDebug(string.format("[Unified] Evaluating %s cache: applying pure total %.2fx", statType, total))
 
         if statType == "Tears" then
-            StatUtils.stats.tears.applyMultiplier(player, total, nil, false)
+            StatsAPI.stats.tears.applyMultiplier(player, total, nil, false)
             local add = self[playerID] and self[playerID].statMultipliers and self[playerID].statMultipliers[statType] and (self[playerID].statMultipliers[statType].totalAdditions or 0) or 0
             if add ~= 0 then
-                StatUtils.stats.tears.applyAddition(player, add, nil)
-                StatUtils.printDebug(string.format("[Unified] Applied Tears SPS addition at cache: %+0.4f", add))
+                StatsAPI.stats.tears.applyAddition(player, add, nil)
+                StatsAPI.printDebug(string.format("[Unified] Applied Tears SPS addition at cache: %+0.4f", add))
             end
         elseif statType == "Damage" then
             local add = self[playerID] and self[playerID].statMultipliers and self[playerID].statMultipliers[statType] and (self[playerID].statMultipliers[statType].totalAdditions or 0) or 0
             local baseDamage = player.Damage
             local finalDamage = (baseDamage + add) * total
 
-            StatUtils.printDebug(string.format("[Unified] Damage calc: (%.2f base + %.2f add) x %.2fx mult = %.2f final",
+            StatsAPI.printDebug(string.format("[Unified] Damage calc: (%.2f base + %.2f add) x %.2fx mult = %.2f final",
                 baseDamage, add, total, finalDamage))
 
             player.Damage = math.max(0.1, finalDamage)
-            StatUtils.stats.damage.applyPoisonDamageCombined(player, total, add)
+            StatsAPI.stats.damage.applyPoisonDamageCombined(player, total, add)
         elseif statType == "Range" then
-            StatUtils.stats.range.applyMultiplier(player, total, 0.1, false)
+            StatsAPI.stats.range.applyMultiplier(player, total, 0.1, false)
         elseif statType == "Luck" then
-            StatUtils.stats.luck.applyMultiplier(player, total, 0.1, false)
+            StatsAPI.stats.luck.applyMultiplier(player, total, 0.1, false)
         elseif statType == "Speed" then
-            StatUtils.stats.speed.applyMultiplier(player, total, 0.1, false)
+            StatsAPI.stats.speed.applyMultiplier(player, total, 0.1, false)
         elseif statType == "ShotSpeed" then
-            StatUtils.stats.shotSpeed.applyMultiplier(player, total, 0.1, false)
+            StatsAPI.stats.shotSpeed.applyMultiplier(player, total, 0.1, false)
         end
         self._isEvaluatingCache = false
     end
 
     -- Register MC_EVALUATE_CACHE callback
-    StatUtils.mod:AddCallback(ModCallbacks.MC_EVALUATE_CACHE, function(_, player, cacheFlag)
-        if StatUtils.stats and StatUtils.stats.unifiedMultipliers and StatUtils.stats.unifiedMultipliers.OnEvaluateCache then
-            StatUtils.stats.unifiedMultipliers:OnEvaluateCache(player, cacheFlag)
+    StatsAPI.mod:AddCallback(ModCallbacks.MC_EVALUATE_CACHE, function(_, player, cacheFlag)
+        if StatsAPI.stats and StatsAPI.stats.unifiedMultipliers and StatsAPI.stats.unifiedMultipliers.OnEvaluateCache then
+            StatsAPI.stats.unifiedMultipliers:OnEvaluateCache(player, cacheFlag)
         end
     end)
 
     -- Auto-load/reset on game start
-    StatUtils.mod:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function(_, isContinued)
+    StatsAPI.mod:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function(_, isContinued)
         if not isContinued then
             -- New run: clear all data
-            StatUtils:ClearRunData()
-            if StatUtils.stats.multiplierDisplay then
-                StatUtils.stats.multiplierDisplay:ResetForNewGame()
+            StatsAPI:ClearRunData()
+            if StatsAPI.stats.multiplierDisplay then
+                StatsAPI.stats.multiplierDisplay:ResetForNewGame()
             end
             -- Reset unified multipliers for all known players
-            StatUtils.stats.unifiedMultipliers._justLoaded = false
-            StatUtils.printDebug("[Unified] New game: cleared all data")
+            StatsAPI.stats.unifiedMultipliers._justLoaded = false
+            StatsAPI.printDebug("[Unified] New game: cleared all data")
         else
             -- Continue: load saved data
-            StatUtils:LoadRunData()
+            StatsAPI:LoadRunData()
         end
 
         local numPlayers = Game():GetNumPlayers()
@@ -2591,13 +2591,13 @@ do
             local player = Isaac.GetPlayer(i)
             if player then
                 if isContinued then
-                    StatUtils.stats.unifiedMultipliers:LoadFromSaveManager(player)
+                    StatsAPI.stats.unifiedMultipliers:LoadFromSaveManager(player)
                 end
                 player:AddCacheFlags(CacheFlag.CACHE_ALL)
                 player:EvaluateItems()
             end
         end
-        StatUtils.printDebug("[Unified] Loaded multipliers for all players on POST_GAME_STARTED")
+        StatsAPI.printDebug("[Unified] Loaded multipliers for all players on POST_GAME_STARTED")
     end)
 
     -- Map stat to cache flag
@@ -2611,27 +2611,27 @@ do
     }
 
     -- Queue a cache update for a specific stat to be processed next frame
-    function StatUtils.stats.unifiedMultipliers:QueueCacheUpdate(player, statType)
+    function StatsAPI.stats.unifiedMultipliers:QueueCacheUpdate(player, statType)
         if not player or not statType then return end
         self:InitPlayer(player)
-        local playerID = StatUtils:GetPlayerInstanceKey(player)
+        local playerID = StatsAPI:GetPlayerInstanceKey(player)
         local flag = STAT_TO_CACHE_FLAG[statType] or CacheFlag.CACHE_ALL
         self[playerID].pendingCache[flag] = true
         self._hasPending = true
-        StatUtils.printDebug(string.format("[Unified] Queued cache update for %s (flag %d)", statType, flag))
+        StatsAPI.printDebug(string.format("[Unified] Queued cache update for %s (flag %d)", statType, flag))
     end
 
     -- Flush all queued cache updates safely in POST_UPDATE
-    StatUtils.mod:AddCallback(ModCallbacks.MC_POST_UPDATE, function()
-        if not StatUtils.stats or not StatUtils.stats.unifiedMultipliers or not StatUtils.stats.unifiedMultipliers._hasPending then
+    StatsAPI.mod:AddCallback(ModCallbacks.MC_POST_UPDATE, function()
+        if not StatsAPI.stats or not StatsAPI.stats.unifiedMultipliers or not StatsAPI.stats.unifiedMultipliers._hasPending then
             return
         end
-        local um = StatUtils.stats.unifiedMultipliers
+        local um = StatsAPI.stats.unifiedMultipliers
         local numPlayers = Game():GetNumPlayers()
         for i = 0, numPlayers - 1 do
             local player = Isaac.GetPlayer(i)
             if player then
-                local playerID = StatUtils:GetPlayerInstanceKey(player)
+                local playerID = StatsAPI:GetPlayerInstanceKey(player)
                 if um[playerID] and um[playerID].pendingCache then
                     local combined = 0
                     for flag, pending in pairs(um[playerID].pendingCache) do
@@ -2656,4 +2656,4 @@ do
     end)
 end
 
-StatUtils.printDebug("Enhanced Stats library with unified multiplier system loaded successfully!")
+StatsAPI.printDebug("Enhanced Stats library with unified multiplier system loaded successfully!")

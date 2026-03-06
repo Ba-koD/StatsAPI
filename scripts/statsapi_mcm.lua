@@ -18,24 +18,24 @@ local function clampOffset(value)
 end
 
 local function ensureSettingsTable()
-    if not StatUtils then
+    if not StatsAPI then
         return nil
     end
-    if type(StatUtils.settings) ~= "table" then
-        StatUtils.settings = {
+    if type(StatsAPI.settings) ~= "table" then
+        StatsAPI.settings = {
             displayEnabled = true,
             displayOffsetX = 0,
             displayOffsetY = 0,
             trackVanillaDisplay = true,
             debugEnabled = false
         }
-    elseif StatUtils.settings.trackVanillaDisplay == nil then
-        StatUtils.settings.trackVanillaDisplay = true
+    elseif StatsAPI.settings.trackVanillaDisplay == nil then
+        StatsAPI.settings.trackVanillaDisplay = true
     end
-    if StatUtils.settings.debugEnabled == nil then
-        StatUtils.settings.debugEnabled = false
+    if StatsAPI.settings.debugEnabled == nil then
+        StatsAPI.settings.debugEnabled = false
     end
-    return StatUtils.settings
+    return StatsAPI.settings
 end
 
 local function setDisplayOffset(axis, value)
@@ -51,8 +51,8 @@ local function setDisplayOffset(axis, value)
     end
 
     settings[key] = normalized
-    if StatUtils and type(StatUtils.SaveRunData) == "function" then
-        StatUtils:SaveRunData()
+    if StatsAPI and type(StatsAPI.SaveRunData) == "function" then
+        StatsAPI:SaveRunData()
     end
 end
 
@@ -71,26 +71,26 @@ local function resetDisplayDefaults()
     settings.debugEnabled = false
 
     if previousTrackVanilla ~= true
-        and StatUtils
-        and type(StatUtils.SetVanillaDisplayTrackingEnabled) == "function" then
-        StatUtils:SetVanillaDisplayTrackingEnabled(true)
+        and StatsAPI
+        and type(StatsAPI.SetVanillaDisplayTrackingEnabled) == "function" then
+        StatsAPI:SetVanillaDisplayTrackingEnabled(true)
     end
 
     if previousDebugEnabled
-        and StatUtils
-        and type(StatUtils.SetDebugModeEnabled) == "function" then
-        StatUtils:SetDebugModeEnabled(false)
-    elseif StatUtils then
-        StatUtils.DEBUG = false
+        and StatsAPI
+        and type(StatsAPI.SetDebugModeEnabled) == "function" then
+        StatsAPI:SetDebugModeEnabled(false)
+    elseif StatsAPI then
+        StatsAPI.DEBUG = false
     end
 
-    if StatUtils and StatUtils.stats and StatUtils.stats.multiplierDisplay
-        and type(StatUtils.stats.multiplierDisplay.RefreshAllFromUnified) == "function" then
-        StatUtils.stats.multiplierDisplay:RefreshAllFromUnified()
+    if StatsAPI and StatsAPI.stats and StatsAPI.stats.multiplierDisplay
+        and type(StatsAPI.stats.multiplierDisplay.RefreshAllFromUnified) == "function" then
+        StatsAPI.stats.multiplierDisplay:RefreshAllFromUnified()
     end
 
-    if StatUtils and type(StatUtils.SaveRunData) == "function" then
-        StatUtils:SaveRunData()
+    if StatsAPI and type(StatsAPI.SaveRunData) == "function" then
+        StatsAPI:SaveRunData()
     end
 end
 
@@ -102,15 +102,15 @@ local function hasMCM()
 end
 
 local function getDisplayEnabled()
-    if StatUtils and type(StatUtils.IsDisplayEnabled) == "function" then
-        return StatUtils:IsDisplayEnabled()
+    if StatsAPI and type(StatsAPI.IsDisplayEnabled) == "function" then
+        return StatsAPI:IsDisplayEnabled()
     end
     return true
 end
 
 local function getTrackVanillaDisplay()
-    if StatUtils and type(StatUtils.IsVanillaDisplayTrackingEnabled) == "function" then
-        return StatUtils:IsVanillaDisplayTrackingEnabled()
+    if StatsAPI and type(StatsAPI.IsVanillaDisplayTrackingEnabled) == "function" then
+        return StatsAPI:IsVanillaDisplayTrackingEnabled()
     end
     local settings = ensureSettingsTable()
     if settings then
@@ -120,14 +120,14 @@ local function getTrackVanillaDisplay()
 end
 
 local function getDebugEnabled()
-    if StatUtils and type(StatUtils.IsDebugModeEnabled) == "function" then
-        return StatUtils:IsDebugModeEnabled()
+    if StatsAPI and type(StatsAPI.IsDebugModeEnabled) == "function" then
+        return StatsAPI:IsDebugModeEnabled()
     end
     local settings = ensureSettingsTable()
     if settings then
         return settings.debugEnabled == true
     end
-    return StatUtils and StatUtils.DEBUG == true or false
+    return StatsAPI and StatsAPI.DEBUG == true or false
 end
 
 local function getDisplayOffsetX()
@@ -135,8 +135,8 @@ local function getDisplayOffsetX()
     if settings then
         return clampOffset(settings.displayOffsetX)
     end
-    if StatUtils and type(StatUtils.GetDisplayOffsetX) == "function" then
-        return clampOffset(StatUtils:GetDisplayOffsetX())
+    if StatsAPI and type(StatsAPI.GetDisplayOffsetX) == "function" then
+        return clampOffset(StatsAPI:GetDisplayOffsetX())
     end
     return 0
 end
@@ -146,8 +146,8 @@ local function getDisplayOffsetY()
     if settings then
         return clampOffset(settings.displayOffsetY)
     end
-    if StatUtils and type(StatUtils.GetDisplayOffsetY) == "function" then
-        return clampOffset(StatUtils:GetDisplayOffsetY())
+    if StatsAPI and type(StatsAPI.GetDisplayOffsetY) == "function" then
+        return clampOffset(StatsAPI:GetDisplayOffsetY())
     end
     return 0
 end
@@ -157,7 +157,7 @@ function M.Setup()
         return false
     end
 
-    local category = "Stat Utils"
+    local category = "StatsAPI"
     local subcategory = "Display"
 
     if type(ModConfigMenu.RemoveCategory) == "function" then
@@ -180,10 +180,10 @@ function M.Setup()
             local enabled = getDisplayEnabled()
             return "Multiplier HUD: " .. (enabled and "ON" or "OFF")
         end,
-        Info = { "Toggle Stat Utils multiplier HUD rendering." },
+        Info = { "Toggle StatsAPI multiplier HUD rendering." },
         OnChange = function(value)
-            if StatUtils and StatUtils.SetDisplayEnabled then
-                StatUtils:SetDisplayEnabled(value)
+            if StatsAPI and StatsAPI.SetDisplayEnabled then
+                StatsAPI:SetDisplayEnabled(value)
             end
         end
     })
@@ -203,8 +203,8 @@ function M.Setup()
         },
         OnChange = function(value)
             local enabled = value ~= false
-            if StatUtils and type(StatUtils.SetVanillaDisplayTrackingEnabled) == "function" then
-                StatUtils:SetVanillaDisplayTrackingEnabled(enabled)
+            if StatsAPI and type(StatsAPI.SetVanillaDisplayTrackingEnabled) == "function" then
+                StatsAPI:SetVanillaDisplayTrackingEnabled(enabled)
                 return
             end
 
@@ -214,13 +214,13 @@ function M.Setup()
             end
             settings.trackVanillaDisplay = enabled
 
-            if StatUtils and StatUtils.stats and StatUtils.stats.multiplierDisplay
-                and type(StatUtils.stats.multiplierDisplay.RefreshAllFromUnified) == "function" then
-                StatUtils.stats.multiplierDisplay:RefreshAllFromUnified()
+            if StatsAPI and StatsAPI.stats and StatsAPI.stats.multiplierDisplay
+                and type(StatsAPI.stats.multiplierDisplay.RefreshAllFromUnified) == "function" then
+                StatsAPI.stats.multiplierDisplay:RefreshAllFromUnified()
             end
 
-            if StatUtils and type(StatUtils.SaveRunData) == "function" then
-                StatUtils:SaveRunData()
+            if StatsAPI and type(StatsAPI.SaveRunData) == "function" then
+                StatsAPI:SaveRunData()
             end
         end
     })
@@ -240,8 +240,8 @@ function M.Setup()
         },
         OnChange = function(value)
             local enabled = value == true
-            if StatUtils and type(StatUtils.SetDebugModeEnabled) == "function" then
-                StatUtils:SetDebugModeEnabled(enabled)
+            if StatsAPI and type(StatsAPI.SetDebugModeEnabled) == "function" then
+                StatsAPI:SetDebugModeEnabled(enabled)
                 return
             end
 
@@ -250,11 +250,11 @@ function M.Setup()
                 return
             end
             settings.debugEnabled = enabled
-            if StatUtils then
-                StatUtils.DEBUG = enabled
+            if StatsAPI then
+                StatsAPI.DEBUG = enabled
             end
-            if StatUtils and type(StatUtils.SaveRunData) == "function" then
-                StatUtils:SaveRunData()
+            if StatsAPI and type(StatsAPI.SaveRunData) == "function" then
+                StatsAPI:SaveRunData()
             end
         end
     })
@@ -271,7 +271,7 @@ function M.Setup()
                 return string.format("HUD Offset X: %+d", getDisplayOffsetX())
             end,
             Info = {
-                "Horizontal offset for Stat Utils HUD display.",
+                "Horizontal offset for StatsAPI HUD display.",
                 "Positive moves right, negative moves left."
             },
             OnChange = function(value)
@@ -290,7 +290,7 @@ function M.Setup()
                 return string.format("HUD Offset Y: %+d", getDisplayOffsetY())
             end,
             Info = {
-                "Vertical offset for Stat Utils HUD display.",
+                "Vertical offset for StatsAPI HUD display.",
                 "Positive moves down, negative moves up."
             },
             OnChange = function(value)

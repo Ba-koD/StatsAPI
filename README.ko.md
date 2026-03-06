@@ -1,4 +1,4 @@
-# Stat Utils 문서 (KO)
+# StatsAPI 문서 (KO)
 
 [English version](README.en.md)
 
@@ -9,11 +9,11 @@
 
 #### 1-1. 기본 규칙
 
-- `StatUtils`는 전역 테이블이라 `require` 없이 바로 사용합니다.
+- `StatsAPI`는 전역 테이블이라 `require` 없이 바로 사용합니다.
 - 다른 모드에서는 항상 먼저 존재 여부를 체크합니다.
 
 ```lua
-if not StatUtils then return end
+if not StatsAPI then return end
 ```
 
 #### 1-2. 배율(Multiplier) 등록 예시
@@ -26,12 +26,12 @@ local ITEM_ID = Isaac.GetItemIdByName("My Item")
 local ITEM_KEY = "my_mod:my_item"
 
 mod:AddCallback(ModCallbacks.MC_EVALUATE_CACHE, function(_, player, cacheFlag)
-    if not StatUtils then return end
+    if not StatsAPI then return end
 
     if cacheFlag == CacheFlag.CACHE_DAMAGE then
         if player:HasCollectible(ITEM_ID) then
             local count = player:GetCollectibleNum(ITEM_ID)
-            StatUtils.stats.unifiedMultipliers:SetItemMultiplier(
+            StatsAPI.stats.unifiedMultipliers:SetItemMultiplier(
                 player,
                 ITEM_KEY,
                 "Damage",
@@ -39,7 +39,7 @@ mod:AddCallback(ModCallbacks.MC_EVALUATE_CACHE, function(_, player, cacheFlag)
                 "My Item"
             )
         else
-            StatUtils.stats.unifiedMultipliers:RemoveItemMultiplier(player, ITEM_KEY, "Damage")
+            StatsAPI.stats.unifiedMultipliers:RemoveItemMultiplier(player, ITEM_KEY, "Damage")
         end
     end
 end)
@@ -59,7 +59,7 @@ local ITEM_KEY = "my_mod:my_item"
 local lastCount = {}
 
 mod:AddCallback(ModCallbacks.MC_POST_PEFFECT_UPDATE, function(_, player)
-    if not StatUtils then return end
+    if not StatsAPI then return end
 
     local ptr = GetPtrHash(player)
     local now = player:GetCollectibleNum(ITEM_ID)
@@ -67,11 +67,11 @@ mod:AddCallback(ModCallbacks.MC_POST_PEFFECT_UPDATE, function(_, player)
 
     if now > prev then
         for _ = 1, (now - prev) do
-            StatUtils.stats.unifiedMultipliers:SetItemAddition(player, ITEM_KEY, "Tears", 0.3, "My Item")
+            StatsAPI.stats.unifiedMultipliers:SetItemAddition(player, ITEM_KEY, "Tears", 0.3, "My Item")
         end
     elseif now < prev then
         -- RemoveItemAddition은 Addition + AdditiveMultiplier를 같이 제거함
-        StatUtils.stats.unifiedMultipliers:RemoveItemAddition(player, ITEM_KEY, "Tears")
+        StatsAPI.stats.unifiedMultipliers:RemoveItemAddition(player, ITEM_KEY, "Tears")
     end
 
     lastCount[ptr] = now
@@ -83,7 +83,7 @@ end)
 `SetItemMultiplierDisabled`는 multiplier 엔트리를 삭제하지 않고 ON/OFF 합니다.
 
 ```lua
-local um = StatUtils.stats.unifiedMultipliers
+local um = StatsAPI.stats.unifiedMultipliers
 
 -- 먼저 multiplier가 등록되어 있어야 함
 um:SetItemMultiplier(player, ITEM_KEY, "Damage", 1.5, "My Item")
@@ -147,8 +147,8 @@ um:SetItemMultiplierDisabled(player, ITEM_KEY, "Damage", false)
 
 #### 3-1. 초기화
 
-1. `main.lua`에서 `scripts/stat_utils_core.lua` 로드
-2. `stat_utils_core.lua`에서 `StatUtils` 전역 생성
+1. `main.lua`에서 `scripts/statsapi_core.lua` 로드
+2. `statsapi_core.lua`에서 `StatsAPI` 전역 생성
 3. `scripts/lib/stats.lua`, `scripts/lib/vanilla_multipliers.lua`, `scripts/lib/damage_utils.lua` 로드
 4. HUD 렌더 콜백 등록
 
@@ -171,10 +171,10 @@ um:SetItemMultiplierDisabled(player, ITEM_KEY, "Damage", false)
 ### 4) 파일별 역할
 
 - `main.lua`
-  - 코어 로더만 담당 (`require("scripts/stat_utils_core")`)
+  - 코어 로더만 담당 (`require("scripts/statsapi_core")`)
 
-- `scripts/stat_utils_core.lua`
-  - 전역 `StatUtils` 생성
+- `scripts/statsapi_core.lua`
+  - 전역 `StatsAPI` 생성
   - 로그/디버그/저장 시스템
   - 하위 모듈 로드
   - 종료 시 저장 콜백 등록
@@ -200,8 +200,8 @@ um:SetItemMultiplierDisabled(player, ITEM_KEY, "Damage", false)
 - `SetItemAddition`, `SetItemAdditiveMultiplier`는 누적형이라 반복 호출 시 계속 누적됩니다.
 - `SetItemMultiplierDisabled`는 multiplier(`SetItemMultiplier`)에만 적용됩니다.
 - `disabled` 상태는 저장/불러오기 시 유지됩니다.
-- Mod Config Menu가 설치되어 있으면 `Stat Utils > Display > Multiplier HUD`에서 표시 ON/OFF가 가능합니다.
-- HUD 위치는 Isaac `Options.HUDOffset`을 따라가며, `Stat Utils > Display > HUD Offset X/Y`로 추가 미세 조정할 수 있습니다.
+- Mod Config Menu가 설치되어 있으면 `StatsAPI > Display > Multiplier HUD`에서 표시 ON/OFF가 가능합니다.
+- HUD 위치는 Isaac `Options.HUDOffset`을 따라가며, `StatsAPI > Display > HUD Offset X/Y`로 추가 미세 조정할 수 있습니다.
 - `RemoveItemAddition`은 addition만 지우는 함수가 아니라 additive multiplier도 같이 지웁니다.
 - `statType` 오타/대소문자 불일치는 적용되지 않습니다.
-- 외부 모드에서는 항상 `if not StatUtils then return end` 체크를 먼저 두는 게 안전합니다.
+- 외부 모드에서는 항상 `if not StatsAPI then return end` 체크를 먼저 두는 게 안전합니다.

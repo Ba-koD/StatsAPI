@@ -1,4 +1,4 @@
-# Stat Utils Documentation
+# StatsAPI Documentation
 
 README files are split by language.
 

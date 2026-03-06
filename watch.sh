@@ -115,7 +115,7 @@ MODS_DIR="$(dirname "$MOD_DIR")"
 DATA_DIR="$(dirname "$MODS_DIR")/data"
 QUEUE_DIR="$DATA_DIR/$MOD_NAME"
 QUEUE_FILE="$QUEUE_DIR/save${SAVE_SLOT}.dat"
-QUEUE_PREFIX="__SUQ__"
+QUEUE_PREFIX="__SAPIQ__"
 
 mkdir -p "$QUEUE_DIR"
 if [ ! -s "$QUEUE_FILE" ]; then

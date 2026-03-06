@@ -1,13 +1,13 @@
--- Stat Utils - Vanilla Item Damage Multipliers Table
+-- StatsAPI - Vanilla Item Damage Multipliers Table
 -- Based on Epiphany mod's collectible_damage_multipliers.lua (Repentance+ accurate)
 -- Provides vanilla item/character damage and fire rate multiplier lookup
 
-StatUtils.VanillaMultipliers = StatUtils.VanillaMultipliers or {}
+StatsAPI.VanillaMultipliers = StatsAPI.VanillaMultipliers or {}
 local IS_REPENTANCE_PLUS = rawget(_G, "REPENTANCE_PLUS") == true
 local TWENTY_TWENTY_DAMAGE_MULT = IS_REPENTANCE_PLUS and 0.8 or 0.75
 
 -- Damage multipliers for vanilla collectibles (Rep+ accurate, from Epiphany)
-StatUtils.VanillaMultipliers.CollectibleDamage = {
+StatsAPI.VanillaMultipliers.CollectibleDamage = {
     [CollectibleType.COLLECTIBLE_MEGA_MUSH] = function(player)
         if not player:GetEffects():HasCollectibleEffect(CollectibleType.COLLECTIBLE_MEGA_MUSH) then return 1 end
         return 4
@@ -45,7 +45,7 @@ StatUtils.VanillaMultipliers.CollectibleDamage = {
 }
 
 -- Character-specific damage multipliers (Rep+ accurate, from Epiphany)
-StatUtils.VanillaMultipliers.CharacterDamage = {
+StatsAPI.VanillaMultipliers.CharacterDamage = {
     [PlayerType.PLAYER_ISAAC] = 1,
     [PlayerType.PLAYER_MAGDALENE] = 1,
     [PlayerType.PLAYER_CAIN] = 1.2,
@@ -93,7 +93,7 @@ StatUtils.VanillaMultipliers.CharacterDamage = {
 -- Get total damage multiplier from vanilla items for a player
 ---@param player EntityPlayer
 ---@return number totalMultiplier
-function StatUtils.VanillaMultipliers:GetPlayerDamageMultiplier(player)
+function StatsAPI.VanillaMultipliers:GetPlayerDamageMultiplier(player)
     if not player then return 1.0 end
 
     local charMult = self.CharacterDamage[player:GetPlayerType()]
@@ -130,7 +130,7 @@ end
 -- Get total fire rate multiplier from vanilla items (Rep+ accurate)
 ---@param player EntityPlayer
 ---@return number totalMultiplier
-function StatUtils.VanillaMultipliers:GetPlayerFireRateMultiplier(player)
+function StatsAPI.VanillaMultipliers:GetPlayerFireRateMultiplier(player)
     if not player then return 1.0 end
 
     local multi = 1.0
@@ -174,7 +174,7 @@ end
 ---@param player EntityPlayer
 ---@param bonusDamage number
 ---@return number actualBonus
-function StatUtils.VanillaMultipliers:ApplyBonusDamage(player, bonusDamage)
+function StatsAPI.VanillaMultipliers:ApplyBonusDamage(player, bonusDamage)
     if not player or type(bonusDamage) ~= "number" then return 0 end
 
     local multiplier = self:GetPlayerDamageMultiplier(player)
@@ -182,7 +182,7 @@ function StatUtils.VanillaMultipliers:ApplyBonusDamage(player, bonusDamage)
 
     player.Damage = player.Damage + actualBonus
 
-    StatUtils.printDebug(string.format("[VanillaMultipliers] Applied bonus damage: %.2f * %.2fx = %.2f",
+    StatsAPI.printDebug(string.format("[VanillaMultipliers] Applied bonus damage: %.2f * %.2fx = %.2f",
         bonusDamage, multiplier, actualBonus))
 
     return actualBonus
@@ -191,7 +191,7 @@ end
 -- Check if a specific item affects damage multiplier
 ---@param itemID CollectibleType
 ---@return boolean
-function StatUtils.VanillaMultipliers:HasDamageMultiplier(itemID)
+function StatsAPI.VanillaMultipliers:HasDamageMultiplier(itemID)
     return self.CollectibleDamage[itemID] ~= nil
 end
 
@@ -199,7 +199,7 @@ end
 ---@param player EntityPlayer
 ---@param itemID CollectibleType
 ---@return number
-function StatUtils.VanillaMultipliers:GetItemDamageMultiplier(player, itemID)
+function StatsAPI.VanillaMultipliers:GetItemDamageMultiplier(player, itemID)
     local mult = self.CollectibleDamage[itemID]
     if not mult then return 1.0 end
 
@@ -209,4 +209,4 @@ function StatUtils.VanillaMultipliers:GetItemDamageMultiplier(player, itemID)
     return mult
 end
 
-StatUtils.printDebug("Vanilla Multipliers table loaded successfully! (Rep+ accurate from Epiphany)")
+StatsAPI.printDebug("Vanilla Multipliers table loaded successfully! (Rep+ accurate from Epiphany)")

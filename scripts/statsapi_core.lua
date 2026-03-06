@@ -1,42 +1,42 @@
--- Stat Utils - Core Module
+-- StatsAPI - Core Module
 -- Standalone stat multiplier management library for Isaac mods
--- Exposes global 'StatUtils' table for use by other mods
+-- Exposes global 'StatsAPI' table for use by other mods
 --
 -- Usage from another mod:
---   if StatUtils then
---       StatUtils.stats.unifiedMultipliers:SetItemMultiplier(player, itemID, "Damage", 1.5, "My Item")
---       StatUtils.stats.unifiedMultipliers:SetItemAddition(player, itemID, "Damage", 2.0, "My Item")
---       StatUtils.stats.unifiedMultipliers:SetItemAdditiveMultiplier(player, itemID, "Damage", 1.2, "My Item")
---       StatUtils.stats.damage.applyMultiplier(player, 1.5)
+--   if StatsAPI then
+--       StatsAPI.stats.unifiedMultipliers:SetItemMultiplier(player, itemID, "Damage", 1.5, "My Item")
+--       StatsAPI.stats.unifiedMultipliers:SetItemAddition(player, itemID, "Damage", 2.0, "My Item")
+--       StatsAPI.stats.unifiedMultipliers:SetItemAdditiveMultiplier(player, itemID, "Damage", 1.2, "My Item")
+--       StatsAPI.stats.damage.applyMultiplier(player, 1.5)
 --   end
 
 local json = require("json")
 
-local mod = RegisterMod("Stat Utils", 1)
+local mod = RegisterMod("StatsAPI", 1)
 local _mcmModule = nil
 local _mcmSetupDone = false
 local _normalizeSettings
 
----@class StatUtils
-local _existingStatUtils = rawget(_G, "StatUtils")
-if type(_existingStatUtils) == "table" then
-    StatUtils = _existingStatUtils
+---@class StatsAPI
+local _existingStatsAPI = rawget(_G, "StatsAPI")
+if type(_existingStatsAPI) == "table" then
+    StatsAPI = _existingStatsAPI
 else
-    StatUtils = {}
+    StatsAPI = {}
 end
 
-StatUtils.mod = mod
-StatUtils.VERSION = "1.0.0"
-StatUtils.DEBUG = StatUtils.DEBUG == true
-StatUtils.DEFAULT_SETTINGS = {
+StatsAPI.mod = mod
+StatsAPI.VERSION = "1.0.0"
+StatsAPI.DEBUG = StatsAPI.DEBUG == true
+StatsAPI.DEFAULT_SETTINGS = {
     displayEnabled = true,
     displayOffsetX = 0,
     displayOffsetY = 0,
     trackVanillaDisplay = true,
     debugEnabled = false
 }
-if type(StatUtils.settings) ~= "table" then
-    StatUtils.settings = {
+if type(StatsAPI.settings) ~= "table" then
+    StatsAPI.settings = {
         displayEnabled = true,
         displayOffsetX = 0,
         displayOffsetY = 0,
@@ -44,8 +44,8 @@ if type(StatUtils.settings) ~= "table" then
         debugEnabled = false
     }
 end
-if StatUtils.DEBUG then
-    Isaac.DebugString("[StatUtils][DEBUG] [Core] Global StatUtils table ref = " .. tostring(StatUtils))
+if StatsAPI.DEBUG then
+    Isaac.DebugString("[StatsAPI][DEBUG] [Core] Global StatsAPI table ref = " .. tostring(StatsAPI))
 end
 
 local game = Game()
@@ -65,38 +65,38 @@ RuntimeOverlay.font:Load("font/pftempestasevencondensed.fnt")
 ---------------------------------------------
 -- Logging
 ---------------------------------------------
-function StatUtils.print(msg)
-    local text = "[StatUtils] " .. tostring(msg)
+function StatsAPI.print(msg)
+    local text = "[StatsAPI] " .. tostring(msg)
     Isaac.ConsoleOutput(text .. "\n")
     Isaac.DebugString(text)
 end
 
-function StatUtils.printDebug(msg)
-    if not StatUtils.DEBUG then return end
-    local text = "[StatUtils][DEBUG] " .. tostring(msg)
+function StatsAPI.printDebug(msg)
+    if not StatsAPI.DEBUG then return end
+    local text = "[StatsAPI][DEBUG] " .. tostring(msg)
     Isaac.ConsoleOutput(text .. "\n")
     Isaac.DebugString(text)
 end
 
-function StatUtils.printError(msg)
-    local text = "[StatUtils][ERROR] " .. tostring(msg)
+function StatsAPI.printError(msg)
+    local text = "[StatsAPI][ERROR] " .. tostring(msg)
     Isaac.ConsoleOutput(text .. "\n")
     Isaac.DebugString(text)
 end
 
-function StatUtils:IsDebugModeEnabled()
+function StatsAPI:IsDebugModeEnabled()
     if type(self.settings) ~= "table" then
         self.settings = _normalizeSettings(nil)
     end
     return self.settings.debugEnabled == true
 end
 
-function StatUtils:ClearRuntimeNotice()
+function StatsAPI:ClearRuntimeNotice()
     RuntimeOverlay.frameOfLastMsg = 0
     RuntimeOverlay.messages = {}
 end
 
-function StatUtils:ShowRuntimeNotice(message, kind)
+function StatsAPI:ShowRuntimeNotice(message, kind)
     if not self:IsDebugModeEnabled() then
         return
     end
@@ -114,7 +114,7 @@ function StatUtils:ShowRuntimeNotice(message, kind)
     end
 end
 
-function StatUtils:RenderRuntimeNotice()
+function StatsAPI:RenderRuntimeNotice()
     if not self:IsDebugModeEnabled() then
         self:ClearRuntimeNotice()
         return
@@ -174,8 +174,8 @@ end
 ---------------------------------------------
 -- Simple Run-Based Save System
 ---------------------------------------------
-StatUtils._runData = { players = {} }
-local RUNTIME_QUEUE_PREFIX = "__SUQ__"
+StatsAPI._runData = { players = {} }
+local RUNTIME_QUEUE_PREFIX = "__SAPIQ__"
 local RUNTIME_POLL_INTERVAL = 3
 local _lastRuntimePollFrame = -RUNTIME_POLL_INTERVAL
 
@@ -327,14 +327,14 @@ _normalizeSettings = function(rawSettings)
     return normalized
 end
 
-function StatUtils:IsDisplayEnabled()
+function StatsAPI:IsDisplayEnabled()
     if type(self.settings) ~= "table" then
         self.settings = _normalizeSettings(nil)
     end
     return self.settings.displayEnabled ~= false
 end
 
-function StatUtils:SetDisplayEnabled(enabled)
+function StatsAPI:SetDisplayEnabled(enabled)
     local function toBoolean(value, defaultValue)
         if type(value) == "boolean" then
             return value
@@ -367,11 +367,11 @@ function StatUtils:SetDisplayEnabled(enabled)
         end
     end
 
-    StatUtils.print("HUD display: " .. (self.settings.displayEnabled and "ON" or "OFF"))
+    StatsAPI.print("HUD display: " .. (self.settings.displayEnabled and "ON" or "OFF"))
     self:SaveRunData()
 end
 
-function StatUtils:GetDisplayOffsetX()
+function StatsAPI:GetDisplayOffsetX()
     if type(self.settings) ~= "table" then
         self.settings = _normalizeSettings(nil)
     end
@@ -383,7 +383,7 @@ function StatUtils:GetDisplayOffsetX()
     return x
 end
 
-function StatUtils:GetDisplayOffsetY()
+function StatsAPI:GetDisplayOffsetY()
     if type(self.settings) ~= "table" then
         self.settings = _normalizeSettings(nil)
     end
@@ -395,18 +395,18 @@ function StatUtils:GetDisplayOffsetY()
     return y
 end
 
-function StatUtils:GetDisplayOffsets()
+function StatsAPI:GetDisplayOffsets()
     return self:GetDisplayOffsetX(), self:GetDisplayOffsetY()
 end
 
-function StatUtils:IsVanillaDisplayTrackingEnabled()
+function StatsAPI:IsVanillaDisplayTrackingEnabled()
     if type(self.settings) ~= "table" then
         self.settings = _normalizeSettings(nil)
     end
     return self.settings.trackVanillaDisplay ~= false
 end
 
-function StatUtils:SetDebugModeEnabled(enabled)
+function StatsAPI:SetDebugModeEnabled(enabled)
     local function toBoolean(value, defaultValue)
         if type(value) == "boolean" then
             return value
@@ -442,12 +442,12 @@ function StatUtils:SetDebugModeEnabled(enabled)
     end
 
     if changed then
-        StatUtils.print("Debug mode: " .. (target and "ON" or "OFF"))
+        StatsAPI.print("Debug mode: " .. (target and "ON" or "OFF"))
         self:SaveRunData()
     end
 end
 
-function StatUtils:SetVanillaDisplayTrackingEnabled(enabled)
+function StatsAPI:SetVanillaDisplayTrackingEnabled(enabled)
     local function toBoolean(value, defaultValue)
         if type(value) == "boolean" then
             return value
@@ -506,11 +506,11 @@ function StatUtils:SetVanillaDisplayTrackingEnabled(enabled)
         self.stats.multiplierDisplay:RefreshAllFromUnified()
     end
 
-    StatUtils.print("Vanilla display tracking: " .. (target and "ON" or "OFF"))
+    StatsAPI.print("Vanilla display tracking: " .. (target and "ON" or "OFF"))
     self:SaveRunData()
 end
 
-function StatUtils:SetDisplayOffsets(offsetX, offsetY)
+function StatsAPI:SetDisplayOffsets(offsetX, offsetY)
     if type(self.settings) ~= "table" then
         self.settings = _normalizeSettings(nil)
     end
@@ -533,7 +533,7 @@ function StatUtils:SetDisplayOffsets(offsetX, offsetY)
     end
 
     if changed then
-        StatUtils.printDebug(string.format(
+        StatsAPI.printDebug(string.format(
             "HUD display offset: X %+d, Y %+d",
             self.settings.displayOffsetX,
             self.settings.displayOffsetY
@@ -542,7 +542,7 @@ function StatUtils:SetDisplayOffsets(offsetX, offsetY)
     end
 end
 
-function StatUtils:SetDisplayOffsetX(offsetX)
+function StatsAPI:SetDisplayOffsetX(offsetX)
     local currentY = 0
     if type(self.settings) == "table" and type(self.settings.displayOffsetY) == "number" then
         currentY = self.settings.displayOffsetY
@@ -550,7 +550,7 @@ function StatUtils:SetDisplayOffsetX(offsetX)
     self:SetDisplayOffsets(offsetX, currentY)
 end
 
-function StatUtils:SetDisplayOffsetY(offsetY)
+function StatsAPI:SetDisplayOffsetY(offsetY)
     local currentX = 0
     if type(self.settings) == "table" and type(self.settings.displayOffsetX) == "number" then
         currentX = self.settings.displayOffsetX
@@ -558,7 +558,7 @@ function StatUtils:SetDisplayOffsetY(offsetY)
     self:SetDisplayOffsets(currentX, offsetY)
 end
 
-function StatUtils:GetPlayerInstanceKey(player)
+function StatsAPI:GetPlayerInstanceKey(player)
     if not player then
         return nil
     end
@@ -578,14 +578,14 @@ function StatUtils:GetPlayerInstanceKey(player)
     return "t" .. tostring(player:GetPlayerType())
 end
 
-function StatUtils:GetLegacyPlayerTypeKey(player)
+function StatsAPI:GetLegacyPlayerTypeKey(player)
     if not player then
         return nil
     end
     return "p" .. tostring(player:GetPlayerType())
 end
 
-function StatUtils:GetPlayerRunData(player)
+function StatsAPI:GetPlayerRunData(player)
     local key = self:GetPlayerInstanceKey(player) or self:GetLegacyPlayerTypeKey(player)
     if not self._runData.players then
         self._runData.players = {}
@@ -604,7 +604,7 @@ function StatUtils:GetPlayerRunData(player)
     return self._runData.players[key]
 end
 
-function StatUtils:SaveRunData()
+function StatsAPI:SaveRunData()
     local payload = {
         runData = self._runData,
         settings = _normalizeSettings(self.settings)
@@ -614,15 +614,15 @@ function StatUtils:SaveRunData()
     end)
     if ok and encoded then
         self.mod:SaveData(encoded)
-        StatUtils.printDebug("Run data saved successfully")
+        StatsAPI.printDebug("Run data saved successfully")
     else
-        StatUtils.printError("Failed to save run data: " .. tostring(encoded))
+        StatsAPI.printError("Failed to save run data: " .. tostring(encoded))
     end
 end
 
-function StatUtils:LoadRunData()
+function StatsAPI:LoadRunData()
     if not self.mod:HasData() then
-        StatUtils.printDebug("No saved data found")
+        StatsAPI.printDebug("No saved data found")
         self.settings = _normalizeSettings(self.settings)
         self.DEBUG = self.settings.debugEnabled == true
         return
@@ -643,22 +643,22 @@ function StatUtils:LoadRunData()
         end
         self.settings = _normalizeSettings(data.settings)
         self.DEBUG = self.settings.debugEnabled == true
-        StatUtils.printDebug("Run data loaded successfully")
+        StatsAPI.printDebug("Run data loaded successfully")
     else
-        StatUtils.printError("Failed to load run data: " .. tostring(data))
+        StatsAPI.printError("Failed to load run data: " .. tostring(data))
         self._runData = { players = {} }
         self.settings = _normalizeSettings(nil)
         self.DEBUG = self.settings.debugEnabled == true
     end
 end
 
-function StatUtils:ClearRunData()
+function StatsAPI:ClearRunData()
     self._runData = { players = {} }
     self:SaveRunData()
-    StatUtils.printDebug("Run data cleared (settings preserved)")
+    StatsAPI.printDebug("Run data cleared (settings preserved)")
 end
 
-function StatUtils:PollRuntimeQueue()
+function StatsAPI:PollRuntimeQueue()
     local frame = Isaac.GetFrameCount()
     if (frame - _lastRuntimePollFrame) < RUNTIME_POLL_INTERVAL then
         return
@@ -673,7 +673,7 @@ function StatUtils:PollRuntimeQueue()
     for _, entry in ipairs(queue) do
         if type(entry) == "table" and type(entry.data) == "string" and entry.data ~= "" then
             if entry.type == "msg" then
-                StatUtils.print("[runtime] " .. entry.data)
+                StatsAPI.print("[runtime] " .. entry.data)
                 local kind = "info"
                 local lowered = string.lower(entry.data)
                 if _startsWith(lowered, "reloaded") or _startsWith(lowered, "reload complete") then
@@ -683,7 +683,7 @@ function StatUtils:PollRuntimeQueue()
                 end
                 self:ShowRuntimeNotice(entry.data, kind)
             elseif entry.type == "command" then
-                StatUtils.print("[runtime] Executing command: " .. entry.data)
+                StatsAPI.print("[runtime] Executing command: " .. entry.data)
                 self:ShowRuntimeNotice("Executing: " .. entry.data, "info")
                 Isaac.ExecuteCommand(entry.data)
             end
@@ -696,13 +696,13 @@ end
 ---------------------------------------------
 mod:AddCallback(ModCallbacks.MC_EXECUTE_CMD, function(_, cmd, args)
     if cmd == "statutils_debug" then
-        StatUtils:SetDebugModeEnabled(not StatUtils.DEBUG)
+        StatsAPI:SetDebugModeEnabled(not StatsAPI.DEBUG)
     end
 end)
 
 mod:AddCallback(ModCallbacks.MC_POST_UPDATE, function()
-    if StatUtils and type(StatUtils.PollRuntimeQueue) == "function" then
-        StatUtils:PollRuntimeQueue()
+    if StatsAPI and type(StatsAPI.PollRuntimeQueue) == "function" then
+        StatsAPI:PollRuntimeQueue()
     end
 end)
 
@@ -737,39 +737,39 @@ local function requireFreshModule(modulePath)
 end
 
 local function hasStatsLibrary()
-    return type(StatUtils.stats) == "table"
-        and type(StatUtils.stats.unifiedMultipliers) == "table"
-        and type(StatUtils.stats.multiplierDisplay) == "table"
+    return type(StatsAPI.stats) == "table"
+        and type(StatsAPI.stats.unifiedMultipliers) == "table"
+        and type(StatsAPI.stats.multiplierDisplay) == "table"
 end
 
 local function hasVanillaMultipliers()
-    return type(StatUtils.VanillaMultipliers) == "table"
-        and type(StatUtils.VanillaMultipliers.GetPlayerDamageMultiplier) == "function"
+    return type(StatsAPI.VanillaMultipliers) == "table"
+        and type(StatsAPI.VanillaMultipliers.GetPlayerDamageMultiplier) == "function"
 end
 
 local function hasDamageUtils()
-    return type(StatUtils.DamageUtils) == "table"
-        and type(StatUtils.DamageUtils.isSelfInflictedDamage) == "function"
+    return type(StatsAPI.DamageUtils) == "table"
+        and type(StatsAPI.DamageUtils.isSelfInflictedDamage) == "function"
 end
 
 -- Load stats library (unified multiplier system + display + stat apply functions)
 do
     local statsSuccess, statsErr = requireFreshModule("scripts.lib.stats")
     if not statsSuccess then
-        StatUtils.printError("Stats library require failed: " .. tostring(statsErr))
+        StatsAPI.printError("Stats library require failed: " .. tostring(statsErr))
     end
 
     if not hasStatsLibrary() and type(include) == "function" then
         local includeSuccess, includeErr = pcall(include, "scripts.lib.stats")
         if not includeSuccess then
-            StatUtils.printError("Stats library include fallback failed: " .. tostring(includeErr))
+            StatsAPI.printError("Stats library include fallback failed: " .. tostring(includeErr))
         end
     end
 
     if hasStatsLibrary() then
-        StatUtils.print("Stats library loaded successfully!")
+        StatsAPI.print("Stats library loaded successfully!")
     else
-        StatUtils.printError("Stats library unavailable after load attempts")
+        StatsAPI.printError("Stats library unavailable after load attempts")
     end
 end
 
@@ -777,20 +777,20 @@ end
 do
     local vanillaMultSuccess, vanillaMultErr = requireFreshModule("scripts.lib.vanilla_multipliers")
     if not vanillaMultSuccess then
-        StatUtils.printError("Vanilla Multipliers require failed: " .. tostring(vanillaMultErr))
+        StatsAPI.printError("Vanilla Multipliers require failed: " .. tostring(vanillaMultErr))
     end
 
     if not hasVanillaMultipliers() and type(include) == "function" then
         local includeSuccess, includeErr = pcall(include, "scripts.lib.vanilla_multipliers")
         if not includeSuccess then
-            StatUtils.printError("Vanilla Multipliers include fallback failed: " .. tostring(includeErr))
+            StatsAPI.printError("Vanilla Multipliers include fallback failed: " .. tostring(includeErr))
         end
     end
 
     if hasVanillaMultipliers() then
-        StatUtils.print("Vanilla Multipliers table loaded successfully!")
+        StatsAPI.print("Vanilla Multipliers table loaded successfully!")
     else
-        StatUtils.printError("Vanilla Multipliers table unavailable after load attempts")
+        StatsAPI.printError("Vanilla Multipliers table unavailable after load attempts")
     end
 end
 
@@ -798,35 +798,35 @@ end
 do
     local damageUtilsSuccess, damageUtilsResult = requireFreshModule("scripts.lib.damage_utils")
     if damageUtilsSuccess and type(damageUtilsResult) == "table" then
-        StatUtils.DamageUtils = damageUtilsResult
+        StatsAPI.DamageUtils = damageUtilsResult
     end
     if not damageUtilsSuccess then
-        StatUtils.printError("Damage Utils require failed: " .. tostring(damageUtilsResult))
+        StatsAPI.printError("Damage Utils require failed: " .. tostring(damageUtilsResult))
     end
 
     if not hasDamageUtils() and type(include) == "function" then
         local includeSuccess, includeResultOrErr = pcall(include, "scripts.lib.damage_utils")
         if includeSuccess and type(includeResultOrErr) == "table" then
-            StatUtils.DamageUtils = includeResultOrErr
+            StatsAPI.DamageUtils = includeResultOrErr
         elseif not includeSuccess then
-            StatUtils.printError("Damage Utils include fallback failed: " .. tostring(includeResultOrErr))
+            StatsAPI.printError("Damage Utils include fallback failed: " .. tostring(includeResultOrErr))
         end
     end
 
     if hasDamageUtils() then
-        StatUtils.print("Damage Utils loaded successfully!")
+        StatsAPI.print("Damage Utils loaded successfully!")
     else
-        StatUtils.printError("Damage Utils unavailable after load attempts")
+        StatsAPI.printError("Damage Utils unavailable after load attempts")
     end
 end
 
 -- Load MCM integration (optional)
 do
-    local mcmSuccess, mcmResultOrErr = requireFreshModule("scripts.stat_utils_mcm")
+    local mcmSuccess, mcmResultOrErr = requireFreshModule("scripts.statsapi_mcm")
     if mcmSuccess and type(mcmResultOrErr) == "table" and type(mcmResultOrErr.Setup) == "function" then
         _mcmModule = mcmResultOrErr
     elseif not mcmSuccess then
-        StatUtils.printDebug("MCM module load skipped: " .. tostring(mcmResultOrErr))
+        StatsAPI.printDebug("MCM module load skipped: " .. tostring(mcmResultOrErr))
     end
 end
 
@@ -840,17 +840,17 @@ local function trySetupMCM()
 
     local setupSuccess, setupResultOrErr = pcall(_mcmModule.Setup)
     if not setupSuccess then
-        StatUtils.printError("MCM setup failed: " .. tostring(setupResultOrErr))
+        StatsAPI.printError("MCM setup failed: " .. tostring(setupResultOrErr))
         return false
     end
 
     if setupResultOrErr then
         _mcmSetupDone = true
-        StatUtils.print("MCM integration loaded!")
+        StatsAPI.print("MCM integration loaded!")
         return true
     end
 
-    StatUtils.printDebug("MCM not available yet; will retry on game start")
+    StatsAPI.printDebug("MCM not available yet; will retry on game start")
     return false
 end
 
@@ -860,8 +860,8 @@ mod:AddCallback(ModCallbacks.MC_POST_RENDER, function()
     if not _mcmSetupDone then
         trySetupMCM()
     end
-    if StatUtils and type(StatUtils.RenderRuntimeNotice) == "function" then
-        StatUtils:RenderRuntimeNotice()
+    if StatsAPI and type(StatsAPI.RenderRuntimeNotice) == "function" then
+        StatsAPI:RenderRuntimeNotice()
     end
 end)
 mod:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function()
@@ -873,11 +873,11 @@ end)
 ---------------------------------------------
 -- Initialize Display System
 ---------------------------------------------
-if StatUtils.stats and StatUtils.stats.multiplierDisplay then
-    StatUtils.stats.multiplierDisplay:Initialize()
-    StatUtils.print("Stats display system initialized!")
+if StatsAPI.stats and StatsAPI.stats.multiplierDisplay then
+    StatsAPI.stats.multiplierDisplay:Initialize()
+    StatsAPI.print("Stats display system initialized!")
 else
-    StatUtils.printError("Stats display system not found during initialization!")
+    StatsAPI.printError("Stats display system not found during initialization!")
 end
 
 ---------------------------------------------
@@ -888,18 +888,18 @@ end
 mod:AddCallback(ModCallbacks.MC_PRE_GAME_EXIT, function(_, shouldSave)
     if shouldSave then
         -- Save unified multiplier data for all players
-        if StatUtils.stats and StatUtils.stats.unifiedMultipliers then
+        if StatsAPI.stats and StatsAPI.stats.unifiedMultipliers then
             local numPlayers = Game():GetNumPlayers()
             for i = 0, numPlayers - 1 do
                 local player = Isaac.GetPlayer(i)
                 if player then
-                    StatUtils.stats.unifiedMultipliers:SaveToSaveManager(player)
+                    StatsAPI.stats.unifiedMultipliers:SaveToSaveManager(player)
                 end
             end
         end
-        StatUtils:SaveRunData()
-        StatUtils.printDebug("Game exit: data saved")
+        StatsAPI:SaveRunData()
+        StatsAPI.printDebug("Game exit: data saved")
     end
 end)
 
-StatUtils.print("Stat Utils v" .. StatUtils.VERSION .. " loaded!")
+StatsAPI.print("StatsAPI v" .. StatsAPI.VERSION .. " loaded!")

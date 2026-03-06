@@ -1,4 +1,4 @@
-# Stat Utils Documentation (EN)
+# StatsAPI Documentation (EN)
 
 [한국어 버전](README.ko.md)
 
@@ -9,11 +9,11 @@ This section documents only integration and runtime behavior (no install/introdu
 
 #### 1-1. Basic Rule
 
-- `StatUtils` is a global table, so you can use it without `require`.
+- `StatsAPI` is a global table, so you can use it without `require`.
 - Always guard with an existence check in your mod.
 
 ```lua
-if not StatUtils then return end
+if not StatsAPI then return end
 ```
 
 #### 1-2. Multiplier Registration Example
@@ -26,12 +26,12 @@ local ITEM_ID = Isaac.GetItemIdByName("My Item")
 local ITEM_KEY = "my_mod:my_item"
 
 mod:AddCallback(ModCallbacks.MC_EVALUATE_CACHE, function(_, player, cacheFlag)
-    if not StatUtils then return end
+    if not StatsAPI then return end
 
     if cacheFlag == CacheFlag.CACHE_DAMAGE then
         if player:HasCollectible(ITEM_ID) then
             local count = player:GetCollectibleNum(ITEM_ID)
-            StatUtils.stats.unifiedMultipliers:SetItemMultiplier(
+            StatsAPI.stats.unifiedMultipliers:SetItemMultiplier(
                 player,
                 ITEM_KEY,
                 "Damage",
@@ -39,7 +39,7 @@ mod:AddCallback(ModCallbacks.MC_EVALUATE_CACHE, function(_, player, cacheFlag)
                 "My Item"
             )
         else
-            StatUtils.stats.unifiedMultipliers:RemoveItemMultiplier(player, ITEM_KEY, "Damage")
+            StatsAPI.stats.unifiedMultipliers:RemoveItemMultiplier(player, ITEM_KEY, "Damage")
         end
     end
 end)
@@ -59,7 +59,7 @@ local ITEM_KEY = "my_mod:my_item"
 local lastCount = {}
 
 mod:AddCallback(ModCallbacks.MC_POST_PEFFECT_UPDATE, function(_, player)
-    if not StatUtils then return end
+    if not StatsAPI then return end
 
     local ptr = GetPtrHash(player)
     local now = player:GetCollectibleNum(ITEM_ID)
@@ -67,11 +67,11 @@ mod:AddCallback(ModCallbacks.MC_POST_PEFFECT_UPDATE, function(_, player)
 
     if now > prev then
         for _ = 1, (now - prev) do
-            StatUtils.stats.unifiedMultipliers:SetItemAddition(player, ITEM_KEY, "Tears", 0.3, "My Item")
+            StatsAPI.stats.unifiedMultipliers:SetItemAddition(player, ITEM_KEY, "Tears", 0.3, "My Item")
         end
     elseif now < prev then
         -- RemoveItemAddition clears both Addition and AdditiveMultiplier
-        StatUtils.stats.unifiedMultipliers:RemoveItemAddition(player, ITEM_KEY, "Tears")
+        StatsAPI.stats.unifiedMultipliers:RemoveItemAddition(player, ITEM_KEY, "Tears")
     end
 
     lastCount[ptr] = now
@@ -83,7 +83,7 @@ end)
 `SetItemMultiplierDisabled` toggles a multiplier entry without deleting it.
 
 ```lua
-local um = StatUtils.stats.unifiedMultipliers
+local um = StatsAPI.stats.unifiedMultipliers
 
 -- Multiplier must exist first
 um:SetItemMultiplier(player, ITEM_KEY, "Damage", 1.5, "My Item")
@@ -145,8 +145,8 @@ um:SetItemMultiplierDisabled(player, ITEM_KEY, "Damage", false)
 
 #### 3-1. Initialization
 
-1. `main.lua` loads `scripts/stat_utils_core.lua`
-2. `stat_utils_core.lua` creates global `StatUtils`
+1. `main.lua` loads `scripts/statsapi_core.lua`
+2. `statsapi_core.lua` creates global `StatsAPI`
 3. Loads `scripts/lib/stats.lua`, `scripts/lib/vanilla_multipliers.lua`, `scripts/lib/damage_utils.lua`
 4. Registers HUD render callback
 
@@ -169,10 +169,10 @@ um:SetItemMultiplierDisabled(player, ITEM_KEY, "Damage", false)
 ### 4) File Roles
 
 - `main.lua`
-  - Core loader only (`require("scripts/stat_utils_core")`)
+  - Core loader only (`require("scripts/statsapi_core")`)
 
-- `scripts/stat_utils_core.lua`
-  - Creates global `StatUtils`
+- `scripts/statsapi_core.lua`
+  - Creates global `StatsAPI`
   - Logging/debug/save system
   - Sub-module loading
   - Exit-time save callback
@@ -198,8 +198,8 @@ um:SetItemMultiplierDisabled(player, ITEM_KEY, "Damage", false)
 - `SetItemAddition` and `SetItemAdditiveMultiplier` are cumulative.
 - `SetItemMultiplierDisabled` only applies to multiplier entries (`SetItemMultiplier`).
 - Disabled state is persisted through save/load.
-- If Mod Config Menu is installed, you can toggle HUD rendering at `Stat Utils > Display > Multiplier HUD`.
-- HUD position follows Isaac's `Options.HUDOffset`, and can be fine-tuned with `Stat Utils > Display > HUD Offset X/Y`.
+- If Mod Config Menu is installed, you can toggle HUD rendering at `StatsAPI > Display > Multiplier HUD`.
+- HUD position follows Isaac's `Options.HUDOffset`, and can be fine-tuned with `StatsAPI > Display > HUD Offset X/Y`.
 - `RemoveItemAddition` removes additive multiplier data as well.
 - `statType` typos/case mismatch will not apply.
-- Always check `if not StatUtils then return end` before calling API.
+- Always check `if not StatsAPI then return end` before calling API.

@@ -1,4 +1,4 @@
--- Stat Utils - Damage Utilities
+-- StatsAPI - Damage Utilities
 -- Self-inflicted damage detection and entity type classification
 
 local M = {}
