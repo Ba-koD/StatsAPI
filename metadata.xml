@@ -1,8 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
 <metadata>
-    <directory>statsapi</directory>
     <name>!! StatsAPI</name>
-    <id>statsapi_lib</id>
-    <description>Standalone stat multiplier management and HUD display library for Isaac mods. Provides unified multiplier/addition tracking per player per item, HUD overlay, and vanilla multiplier tables.</description>
-    <version>1.0.0</version>
-    <visibility>Private</visibility>
+    <directory>statsapi</directory>
+    <id>3679589576</id>
+    <description>Stat multiplier API and HUD library for Isaac mods.
+It provides an API for displaying and applying stat multipliers. It can be stored in the form of final multiplier / last multiplier.
+
+Isaac base item stat multipliers are also supported, but not fully yet.
+
+
+스탯 배수 표시/적용 API 모드.
+마지막 배수 / 최종 배수 형태로 표시됩니다.
+
+아이작 기본 아이템 스탯 배수도 지원하지만 아직 완전히 지원하지 않습니다.</description>
+    <version>1.0.1</version>
+    <visibility>Public</visibility>
+    <tag id="Lua"/>
 </metadata>
