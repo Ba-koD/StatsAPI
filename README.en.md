@@ -140,6 +140,98 @@ um:SetItemMultiplierDisabled(player, ITEM_KEY, "Damage", false)
   Poison damage is updated alongside unified damage cache application.
 - Unified damage formula: `(base + add) * multiplier`
 
+---
+
+<a id="en-2-6-player-multipliers"></a>
+#### 2-6. Player-Slot API (`playerMultipliers`)
+
+`StatsAPI.stats.unifiedMultipliers` stores data keyed by **character entity** (`player.InitSeed`).  
+`StatsAPI.stats.playerMultipliers` stores data keyed by **player slot number** (`player:GetPlayerNum()`).
+
+**Key difference:** The slot key remains constant even when the underlying `EntityPlayer` object changes (e.g. Tainted Lazarus flip), so slot data persists across character transformations.
+
+**Co-op use case:** Track effects per human player slot (slot 0 = Player 1, slot 1 = Player 2) independently of which character each player is using.
+
+**Application order:** `unifiedMultipliers` is applied first, then `playerMultipliers` is stacked on top (multiplicative).  
+Final formula: `(base + add_u) * mult_u * mult_p + add_p`
+
+##### Register APIs
+
+- `playerMultipliers:SetMultiplier(player, sourceKey, statType, multiplier, description)`
+  - Register/overwrite multiplier. Safe to call repeatedly in `MC_EVALUATE_CACHE`.
+- `playerMultipliers:SetAddition(player, sourceKey, statType, addition, description)`
+  - Cumulative addition. Re-calling with the same `sourceKey+statType` keeps accumulating.
+- `playerMultipliers:SetAdditiveMultiplier(player, sourceKey, statType, multiplierValue, description)`
+  - Cumulative additive multiplier. Internally accumulates `multiplierValue - 1`.
+
+##### Remove/Disable APIs
+
+- `playerMultipliers:SetMultiplierDisabled(player, sourceKey, statType, disabled)`
+  - Disable (`true`) / re-enable (`false`) without deleting. Returns: changed flag (`boolean`)
+- `playerMultipliers:RemoveMultiplier(player, sourceKey, statType)`
+  - Removes multiplier + addition + additive multiplier all together
+- `playerMultipliers:RemoveAddition(player, sourceKey, statType)`
+  - Removes addition + additive multiplier only (base multiplier is kept)
+
+##### Query APIs
+
+- `playerMultipliers:GetMultipliers(player, statType)`
+  - Returns `totalMultiplier, totalAdditions`. Defaults to `1.0, 0.0` when no data.
+- `playerMultipliers:GetAllMultipliers(player)`
+  - Returns the `statTotals` table for the player's slot
+- `playerMultipliers:ResetPlayer(player)`
+  - Clears all data for the player's slot
+
+##### Example: Registering a multiplier in MC_EVALUATE_CACHE
+
+```lua
+local mod = RegisterMod("My Mod", 1)
+local ITEM_ID = Isaac.GetItemIdByName("My Item")
+local ITEM_KEY = "my_mod:my_item:slot"
+
+mod:AddCallback(ModCallbacks.MC_EVALUATE_CACHE, function(_, player, cacheFlag)
+    if not StatsAPI then return end
+    local pm = StatsAPI.stats.playerMultipliers
+
+    if cacheFlag == CacheFlag.CACHE_DAMAGE then
+        if player:HasCollectible(ITEM_ID) then
+            local count = player:GetCollectibleNum(ITEM_ID)
+            -- Stored per player SLOT — persists even if the character entity changes
+            pm:SetMultiplier(player, ITEM_KEY, "Damage", 1.2 ^ count, "My Item")
+        else
+            pm:RemoveMultiplier(player, ITEM_KEY, "Damage")
+        end
+    end
+end)
+```
+
+##### Example: Cumulative addition (call only on state change)
+
+```lua
+local mod = RegisterMod("My Mod", 1)
+local ITEM_ID = Isaac.GetItemIdByName("My Item")
+local ITEM_KEY = "my_mod:my_item:slot"
+local lastCount = {}
+
+mod:AddCallback(ModCallbacks.MC_POST_PEFFECT_UPDATE, function(_, player)
+    if not StatsAPI then return end
+    local pm = StatsAPI.stats.playerMultipliers
+
+    local ptr  = GetPtrHash(player)
+    local now  = player:GetCollectibleNum(ITEM_ID)
+    local prev = lastCount[ptr] or 0
+
+    if now > prev then
+        for _ = 1, (now - prev) do
+            pm:SetAddition(player, ITEM_KEY, "Tears", 0.3, "My Item")
+        end
+    elseif now < prev then
+        pm:RemoveAddition(player, ITEM_KEY, "Tears")
+    end
+    lastCount[ptr] = now
+end)
+```
+
 <a id="en-3-runtime-flow"></a>
 ### 3) Runtime Flow
 

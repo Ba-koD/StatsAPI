@@ -142,6 +142,99 @@ um:SetItemMultiplierDisabled(player, ITEM_KEY, "Damage", false)
   데미지 캐시 적용 시 Poison 데미지도 같은 수식으로 같이 반영됩니다.
 - Unified Damage 적용식: `(base + add) * multiplier`
 
+---
+
+<a id="kr-2-6-player-multipliers"></a>
+#### 2-6. 플레이어 슬롯 API (`playerMultipliers`)
+
+`StatsAPI.stats.unifiedMultipliers`는 **캐릭터 엔터티(`player.InitSeed`)** 기준으로 데이터를 저장합니다.  
+`StatsAPI.stats.playerMultipliers`는 **플레이어 슬롯 번호(`player:GetPlayerNum()`)** 기준으로 저장합니다.
+
+**차이점:** 같은 슬롯이면 캐릭터 변신 후에도 데이터가 유지됩니다.  
+예: Tainted Lazarus 플립 — 두 폼이 슬롯 0을 공유하므로 같은 배율 데이터를 봅니다.
+
+**코옵에서의 활용:** 플레이어 1(슬롯 0)과 플레이어 2(슬롯 1)의 효과를 분리 관리할 때 유용합니다.
+
+**적용 순서:** `unifiedMultipliers` 먼저 적용 → `playerMultipliers` 추가 적용 (곱셈 스택)  
+최종 공식: `(base + add_u) * mult_u * mult_p + add_p`
+
+##### 등록 API
+
+- `playerMultipliers:SetMultiplier(player, sourceKey, statType, multiplier, description)`
+  - 배율 등록/덮어쓰기. `MC_EVALUATE_CACHE`에서 반복 호출해도 안전.
+- `playerMultipliers:SetAddition(player, sourceKey, statType, addition, description)`
+  - 덧셈 누적. 같은 `sourceKey+statType` 재호출 시 값이 더해짐.
+- `playerMultipliers:SetAdditiveMultiplier(player, sourceKey, statType, multiplierValue, description)`
+  - 가산 배율 누적. 내부적으로 `multiplierValue - 1` 씩 더함.
+
+##### 해제/비활성화 API
+
+- `playerMultipliers:SetMultiplierDisabled(player, sourceKey, statType, disabled)`
+  - 엔트리 보존하며 비활성화(`true`) / 재활성화(`false`). 반환값: 변경 여부(`boolean`)
+- `playerMultipliers:RemoveMultiplier(player, sourceKey, statType)`
+  - multiplier + addition + additive multiplier 전부 제거
+- `playerMultipliers:RemoveAddition(player, sourceKey, statType)`
+  - addition + additive multiplier만 제거 (base multiplier 유지)
+
+##### 조회 API
+
+- `playerMultipliers:GetMultipliers(player, statType)`
+  - `totalMultiplier, totalAdditions` 반환. 없으면 `1.0, 0.0`.
+- `playerMultipliers:GetAllMultipliers(player)`
+  - 슬롯의 전체 `statTotals` 테이블 반환
+- `playerMultipliers:ResetPlayer(player)`
+  - 해당 슬롯의 모든 데이터 초기화
+
+##### 예시: MC_EVALUATE_CACHE에서 배율 등록
+
+```lua
+local mod = RegisterMod("My Mod", 1)
+local ITEM_ID = Isaac.GetItemIdByName("My Item")
+local ITEM_KEY = "my_mod:my_item:slot"
+
+mod:AddCallback(ModCallbacks.MC_EVALUATE_CACHE, function(_, player, cacheFlag)
+    if not StatsAPI then return end
+    local pm = StatsAPI.stats.playerMultipliers
+
+    if cacheFlag == CacheFlag.CACHE_DAMAGE then
+        if player:HasCollectible(ITEM_ID) then
+            local count = player:GetCollectibleNum(ITEM_ID)
+            -- 플레이어 슬롯 기준으로 저장 (캐릭터 변신 후에도 유지)
+            pm:SetMultiplier(player, ITEM_KEY, "Damage", 1.2 ^ count, "My Item")
+        else
+            pm:RemoveMultiplier(player, ITEM_KEY, "Damage")
+        end
+    end
+end)
+```
+
+##### 예시: 누적 덧셈 (상태 변화 시점에만 호출)
+
+```lua
+local mod = RegisterMod("My Mod", 1)
+local ITEM_ID = Isaac.GetItemIdByName("My Item")
+local ITEM_KEY = "my_mod:my_item:slot"
+local lastCount = {}
+
+mod:AddCallback(ModCallbacks.MC_POST_PEFFECT_UPDATE, function(_, player)
+    if not StatsAPI then return end
+    local pm = StatsAPI.stats.playerMultipliers
+
+    local ptr = GetPtrHash(player)
+    local now  = player:GetCollectibleNum(ITEM_ID)
+    local prev = lastCount[ptr] or 0
+
+    if now > prev then
+        for _ = 1, (now - prev) do
+            pm:SetAddition(player, ITEM_KEY, "Tears", 0.3, "My Item")
+        end
+    elseif now < prev then
+        pm:RemoveAddition(player, ITEM_KEY, "Tears")
+    end
+    lastCount[ptr] = now
+end)
+```
+
 <a id="kr-3-runtime-flow"></a>
 ### 3) 내부 동작 순서
 

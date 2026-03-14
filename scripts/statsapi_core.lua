@@ -1073,6 +1073,34 @@ function StatsAPI:GetPlayerInstanceKey(player)
     return "t" .. tostring(player:GetPlayerType())
 end
 
+-- Returns a key based on the player's co-op slot index (player:GetPlayerNum()).
+-- Unlike GetPlayerInstanceKey (which is per character entity / InitSeed),
+-- this key stays constant for a given co-op slot even if the underlying
+-- EntityPlayer object changes (e.g. Tainted Lazarus flip).
+-- Returns "n0", "n1", ... for valid slot indices; falls back to "t<PlayerType>".
+function StatsAPI:GetPlayerNumKey(player)
+    if not player then
+        return nil
+    end
+
+    local ok, num = pcall(function()
+        return player:GetPlayerNum()
+    end)
+    if ok and type(num) == "number" then
+        return "n" .. tostring(num)
+    end
+
+    -- Fallback: use PlayerType as a rough slot approximation
+    local ok2, ptype = pcall(function()
+        return player:GetPlayerType()
+    end)
+    if ok2 and type(ptype) == "number" then
+        return "t" .. tostring(ptype)
+    end
+
+    return nil
+end
+
 function StatsAPI:GetLegacyPlayerTypeKey(player)
     if not player then
         return nil

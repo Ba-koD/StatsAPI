@@ -2923,4 +2923,486 @@ do
     end)
 end
 
+-- =============================================================================
+-- Player-Slot Multiplier System  (StatsAPI.stats.playerMultipliers)
+--
+-- "캐릭터(character) 종속" vs "플레이어(player) 종속" 차이:
+--   · unifiedMultipliers  — 데이터 키: player.InitSeed (캐릭터 엔터티)
+--     캐릭터 엔터티가 바뀌면 데이터도 사라짐.
+--   · playerMultipliers   — 데이터 키: player:GetPlayerNum() (코옵 슬롯 번호)
+--     같은 슬롯이면 캐릭터가 바뀌어도 데이터가 유지됨.
+--     예: Tainted Lazarus 플립 — 두 폼이 슬롯 0을 공유하므로 같은 데이터 사용.
+--
+-- API (StatsAPI.stats.playerMultipliers):
+--   :SetMultiplier(player, sourceKey, statType, multiplier, description)
+--     - 배율 등록/덮어쓰기. MC_EVALUATE_CACHE에서 반복 호출해도 안전.
+--   :SetAddition(player, sourceKey, statType, addition, description)
+--     - 덧셈 누적. 같은 sourceKey+statType을 다시 호출하면 값이 더해짐.
+--   :SetAdditiveMultiplier(player, sourceKey, statType, multiplierValue, description)
+--     - 가산 배율 누적. 내부적으로 (multiplierValue - 1) 씩 더함.
+--   :SetMultiplierDisabled(player, sourceKey, statType, disabled) → boolean
+--     - 데이터 보존하며 비활성화(true) / 재활성화(false).
+--   :RemoveMultiplier(player, sourceKey, statType)
+--     - multiplier + addition + additive multiplier 전부 제거.
+--   :RemoveAddition(player, sourceKey, statType)
+--     - addition + additive multiplier만 제거 (base multiplier 유지).
+--   :GetMultipliers(player, statType) → totalMultiplier, totalAdditions
+--   :GetAllMultipliers(player) → statTotals 테이블
+--   :ResetPlayer(player)
+--     - 해당 슬롯의 모든 데이터 초기화.
+--
+-- 적용 순서:
+--   unifiedMultipliers 콜백이 먼저 실행된 뒤, playerMultipliers 콜백이 적용됨.
+--   결과: (base + add_u) * mult_u ---> * mult_p + add_p (최종값)
+-- =============================================================================
+
+StatsAPI.stats.playerMultipliers = StatsAPI.stats.playerMultipliers or {}
+
+-- slot key 가져오기 (로컬 헬퍼)
+local function _pmSlotKey(player)
+    if not player then return nil end
+    return StatsAPI:GetPlayerNumKey(player)
+end
+
+local _PM_STAT_TO_FLAG = {
+    Damage    = CacheFlag.CACHE_DAMAGE,
+    Tears     = CacheFlag.CACHE_FIREDELAY,
+    Speed     = CacheFlag.CACHE_SPEED,
+    Range     = CacheFlag.CACHE_RANGE,
+    Luck      = CacheFlag.CACHE_LUCK,
+    ShotSpeed = CacheFlag.CACHE_SHOTSPEED,
+}
+
+local _PM_FLAG_TO_STAT = {}
+for stat, flag in pairs(_PM_STAT_TO_FLAG) do
+    _PM_FLAG_TO_STAT[flag] = stat
+end
+
+-- 슬롯 스토리지는 _slots 서브테이블로 분리 (메서드 키와 충돌 방지)
+StatsAPI.stats.playerMultipliers._slots = StatsAPI.stats.playerMultipliers._slots or {}
+
+local function _pmGetSlot(pm, player)
+    local k = _pmSlotKey(player)
+    if not k then return nil, nil end
+    return k, pm._slots[k]
+end
+
+local function _pmEnsureSlot(pm, player)
+    local k = _pmSlotKey(player)
+    if not k then return nil, nil end
+    if not pm._slots[k] then
+        pm._slots[k] = {
+            multipliers         = {},
+            additions           = {},
+            additiveMultipliers = {},
+            statTotals          = {},
+            pendingCache        = {},
+        }
+        StatsAPI.printDebug("[playerMult] Initialized slot " .. k)
+    end
+    return k, pm._slots[k]
+end
+
+-- ----------------------------------------------------------------------------
+-- 초기화
+-- ----------------------------------------------------------------------------
+
+function StatsAPI.stats.playerMultipliers:InitPlayer(player)
+    _pmEnsureSlot(self, player)
+end
+
+-- ----------------------------------------------------------------------------
+-- 내부: 스탯 합산 재계산 및 캐시 업데이트 큐
+-- ----------------------------------------------------------------------------
+
+function StatsAPI.stats.playerMultipliers:RecalculateStat(player, statType)
+    if not player or not statType then return end
+    local k, data = _pmEnsureSlot(self, player)
+    if not k then return end
+
+    -- 배율 합산: source별로 (base + additiveDelta) 를 곱함
+    local totalMult = 1.0
+    local touched = {}
+    for src in pairs(data.multipliers) do touched[src] = true end
+    for src in pairs(data.additiveMultipliers) do touched[src] = true end
+
+    for src in pairs(touched) do
+        local baseM = 1.0
+        local addDelta = 0.0
+
+        local mEntry = data.multipliers[src] and data.multipliers[src][statType]
+        if mEntry and not (mEntry.disabled == true) then
+            baseM = mEntry.value or 1.0
+        end
+
+        local amEntry = data.additiveMultipliers[src] and data.additiveMultipliers[src][statType]
+        if amEntry and not (amEntry.disabled == true) then
+            addDelta = amEntry.cumulative or 0.0
+        end
+
+        local eff = baseM + addDelta
+        if eff < 0 then eff = 0 end
+        totalMult = totalMult * eff
+    end
+
+    -- 덧셈 합산
+    local totalAdd = 0.0
+    for _, perStat in pairs(data.additions) do
+        local e = perStat[statType]
+        if e and not (e.disabled == true) then
+            totalAdd = totalAdd + (e.cumulative or 0)
+        end
+    end
+
+    data.statTotals[statType] = {
+        totalMultiplier = totalMult,
+        totalAdditions  = totalAdd,
+    }
+
+    StatsAPI.printDebug(string.format(
+        "[playerMult] Recalc slot=%s stat=%s mult=%.4fx add=%+.4f",
+        k, statType, totalMult, totalAdd
+    ))
+
+    if not self._isEvaluatingCache then
+        self:QueueCacheUpdate(player, statType)
+    end
+end
+
+function StatsAPI.stats.playerMultipliers:QueueCacheUpdate(player, statType)
+    if not player or not statType then return end
+    local k, data = _pmEnsureSlot(self, player)
+    if not k then return end
+    local flag = _PM_STAT_TO_FLAG[statType] or CacheFlag.CACHE_ALL
+    data.pendingCache[flag] = true
+    self._hasPending = true
+end
+
+-- ----------------------------------------------------------------------------
+-- 쓰기 API
+-- ----------------------------------------------------------------------------
+
+-- 배율 등록/덮어쓰기. MC_EVALUATE_CACHE에서 반복 호출해도 안전.
+function StatsAPI.stats.playerMultipliers:SetMultiplier(player, sourceKey, statType, multiplier, description)
+    if not player or not sourceKey or not statType or type(multiplier) ~= "number" then
+        StatsAPI.printError("playerMultipliers.SetMultiplier: Invalid parameters")
+        return
+    end
+    local k, data = _pmEnsureSlot(self, player)
+    if not k then return end
+    if not data.multipliers[sourceKey] then data.multipliers[sourceKey] = {} end
+    data.multipliers[sourceKey][statType] = {
+        value       = multiplier,
+        description = description or "Unknown",
+        disabled    = false,
+    }
+    self:RecalculateStat(player, statType)
+    StatsAPI.printDebug(string.format(
+        "[playerMult] SetMultiplier slot=%s src=%s %s=%.4fx",
+        k, tostring(sourceKey), statType, multiplier
+    ))
+end
+
+-- 덧셈 누적. 같은 sourceKey+statType을 다시 호출하면 값이 더해짐.
+-- 주로 MC_POST_PEFFECT_UPDATE에서 상태 변화 시점에만 1회 호출 권장.
+function StatsAPI.stats.playerMultipliers:SetAddition(player, sourceKey, statType, addition, description)
+    if not player or not sourceKey or not statType or type(addition) ~= "number" then
+        StatsAPI.printError("playerMultipliers.SetAddition: Invalid parameters")
+        return
+    end
+    local k, data = _pmEnsureSlot(self, player)
+    if not k then return end
+    if not data.additions[sourceKey] then data.additions[sourceKey] = {} end
+    local existing = data.additions[sourceKey][statType]
+    data.additions[sourceKey][statType] = {
+        cumulative  = (existing and existing.cumulative or 0) + addition,
+        lastDelta   = addition,
+        description = description or (existing and existing.description) or "Unknown",
+        disabled    = existing and existing.disabled == true or false,
+    }
+    self:RecalculateStat(player, statType)
+    StatsAPI.printDebug(string.format(
+        "[playerMult] SetAddition slot=%s src=%s %s=%+.4f",
+        k, tostring(sourceKey), statType, addition
+    ))
+end
+
+-- 가산 배율 누적. 내부적으로 (multiplierValue - 1) 씩 더함.
+-- 예: 1.2를 3번 호출 → 내부 delta가 +0.6 누적 → 최종 1.6x 적용
+function StatsAPI.stats.playerMultipliers:SetAdditiveMultiplier(player, sourceKey, statType, multiplierValue, description)
+    if not player or not sourceKey or not statType or type(multiplierValue) ~= "number" then
+        StatsAPI.printError("playerMultipliers.SetAdditiveMultiplier: Invalid parameters")
+        return
+    end
+    local k, data = _pmEnsureSlot(self, player)
+    if not k then return end
+    if not data.additiveMultipliers[sourceKey] then data.additiveMultipliers[sourceKey] = {} end
+    local existing = data.additiveMultipliers[sourceKey][statType]
+    local delta = multiplierValue - 1.0
+    data.additiveMultipliers[sourceKey][statType] = {
+        cumulative  = (existing and existing.cumulative or 0) + delta,
+        lastDelta   = delta,
+        description = description or (existing and existing.description) or "Unknown",
+        disabled    = existing and existing.disabled == true or false,
+    }
+    self:RecalculateStat(player, statType)
+    StatsAPI.printDebug(string.format(
+        "[playerMult] SetAdditiveMultiplier slot=%s src=%s %s=x%.4f",
+        k, tostring(sourceKey), statType, multiplierValue
+    ))
+end
+
+-- ----------------------------------------------------------------------------
+-- 비활성화 / 재활성화
+-- ----------------------------------------------------------------------------
+
+-- 엔트리를 삭제하지 않고 비활성화(true) / 재활성화(false).
+-- 반환값: 변경 여부(boolean)
+function StatsAPI.stats.playerMultipliers:SetMultiplierDisabled(player, sourceKey, statType, disabled)
+    if not player or not sourceKey or not statType then return false end
+    local k, data = _pmGetSlot(self, player)
+    if not k or not data then return false end
+
+    local target  = (disabled == true)
+    local changed = false
+
+    local function applyDisable(bucket)
+        if type(bucket) ~= "table" then return end
+        local ps = bucket[sourceKey]
+        if type(ps) ~= "table" then return end
+        local e = ps[statType]
+        if type(e) ~= "table" then return end
+        if e.disabled ~= target then
+            e.disabled = target
+            changed = true
+        end
+    end
+
+    applyDisable(data.multipliers)
+    applyDisable(data.additions)
+    applyDisable(data.additiveMultipliers)
+
+    if changed then
+        self:RecalculateStat(player, statType)
+        StatsAPI.printDebug(string.format(
+            "[playerMult] SetMultiplierDisabled slot=%s src=%s %s disabled=%s",
+            k, tostring(sourceKey), statType, tostring(target)
+        ))
+    end
+    return changed
+end
+
+-- ----------------------------------------------------------------------------
+-- 제거
+-- ----------------------------------------------------------------------------
+
+-- multiplier + addition + additive multiplier 전부 제거.
+function StatsAPI.stats.playerMultipliers:RemoveMultiplier(player, sourceKey, statType)
+    if not player or not sourceKey or not statType then return end
+    local k, data = _pmGetSlot(self, player)
+    if not k or not data then return end
+
+    local removed = false
+    local function removeFrom(bucket)
+        if type(bucket) ~= "table" then return end
+        local ps = bucket[sourceKey]
+        if type(ps) ~= "table" then return end
+        if ps[statType] ~= nil then
+            ps[statType] = nil
+            if not next(ps) then bucket[sourceKey] = nil end
+            removed = true
+        end
+    end
+
+    removeFrom(data.multipliers)
+    removeFrom(data.additions)
+    removeFrom(data.additiveMultipliers)
+
+    if removed then
+        self:RecalculateStat(player, statType)
+        StatsAPI.printDebug(string.format(
+            "[playerMult] RemoveMultiplier slot=%s src=%s %s",
+            k, tostring(sourceKey), statType
+        ))
+    end
+end
+
+-- addition + additive multiplier만 제거 (base multiplier는 유지).
+function StatsAPI.stats.playerMultipliers:RemoveAddition(player, sourceKey, statType)
+    if not player or not sourceKey or not statType then return end
+    local k, data = _pmGetSlot(self, player)
+    if not k or not data then return end
+
+    local removed = false
+    local function removeFrom(bucket)
+        if type(bucket) ~= "table" then return end
+        local ps = bucket[sourceKey]
+        if type(ps) ~= "table" then return end
+        if ps[statType] ~= nil then
+            ps[statType] = nil
+            if not next(ps) then bucket[sourceKey] = nil end
+            removed = true
+        end
+    end
+
+    removeFrom(data.additions)
+    removeFrom(data.additiveMultipliers)
+
+    if removed then
+        self:RecalculateStat(player, statType)
+        StatsAPI.printDebug(string.format(
+            "[playerMult] RemoveAddition slot=%s src=%s %s",
+            k, tostring(sourceKey), statType
+        ))
+    end
+end
+
+-- ----------------------------------------------------------------------------
+-- 읽기 API
+-- ----------------------------------------------------------------------------
+
+-- totalMultiplier, totalAdditions 반환. 없으면 1.0, 0.0 반환.
+function StatsAPI.stats.playerMultipliers:GetMultipliers(player, statType)
+    if not player or not statType then return 1.0, 0.0 end
+    local _, data = _pmGetSlot(self, player)
+    if not data then return 1.0, 0.0 end
+    local t = data.statTotals[statType]
+    if not t then return 1.0, 0.0 end
+    return t.totalMultiplier or 1.0, t.totalAdditions or 0.0
+end
+
+-- 플레이어 슬롯의 전체 statTotals 테이블 반환.
+function StatsAPI.stats.playerMultipliers:GetAllMultipliers(player)
+    if not player then return {} end
+    local _, data = _pmGetSlot(self, player)
+    if not data then return {} end
+    return data.statTotals or {}
+end
+
+-- ----------------------------------------------------------------------------
+-- 초기화 / 리셋
+-- ----------------------------------------------------------------------------
+
+-- 해당 슬롯의 모든 데이터 초기화.
+function StatsAPI.stats.playerMultipliers:ResetPlayer(player)
+    if not player then return end
+    local k = _pmSlotKey(player)
+    if k and self._slots[k] then
+        self._slots[k] = nil
+        StatsAPI.printDebug("[playerMult] Reset slot " .. k)
+    end
+end
+
+-- ----------------------------------------------------------------------------
+-- 캐시 연동
+-- ----------------------------------------------------------------------------
+do
+    -- MC_POST_UPDATE: 큐에 쌓인 캐시 업데이트 플러시
+    StatsAPI.mod:AddCallback(ModCallbacks.MC_POST_UPDATE, function()
+        local pm = StatsAPI.stats and StatsAPI.stats.playerMultipliers
+        if not pm or not pm._hasPending then return end
+
+        local numPlayers = Game():GetNumPlayers()
+        for i = 0, numPlayers - 1 do
+            local player = Isaac.GetPlayer(i)
+            if player then
+                local k = _pmSlotKey(player)
+                local slotData = k and pm._slots[k]
+                if slotData and slotData.pendingCache then
+                    local combined  = 0
+                    local hadPending = false
+                    for flag, pending in pairs(slotData.pendingCache) do
+                        if pending and type(flag) == "number" then
+                            hadPending = true
+                            combined = combined + flag
+                        end
+                    end
+                    if hadPending then
+                        if combined == 0 then combined = CacheFlag.CACHE_ALL end
+                        player:AddCacheFlags(combined)
+                        player:EvaluateItems()
+                        slotData.pendingCache = {}
+                        StatsAPI.printDebug(string.format(
+                            "[playerMult] Flushed cache slot=%s mask=%d", k, combined
+                        ))
+                    end
+                end
+            end
+        end
+        pm._hasPending = false
+    end)
+
+    -- MC_EVALUATE_CACHE: 슬롯 합산값을 실제 플레이어 스탯에 적용.
+    -- unifiedMultipliers 콜백이 먼저 실행된 뒤 이 콜백이 실행됨.
+    -- 적용 공식: current_stat * totalMult + totalAdd
+    local function pmOnEvaluateCache(player, cacheFlag)
+        local pm = StatsAPI.stats and StatsAPI.stats.playerMultipliers
+        if not pm then return end
+
+        local statType = _PM_FLAG_TO_STAT[cacheFlag]
+        if not statType then return end
+
+        local k, data = _pmGetSlot(pm, player)
+        if not k or not data then return end
+
+        local t = data.statTotals[statType]
+        if not t then return end
+
+        local totalMult = t.totalMultiplier or 1.0
+        local totalAdd  = t.totalAdditions  or 0.0
+        if totalMult == 1.0 and totalAdd == 0.0 then return end
+
+        pm._isEvaluatingCache = true
+
+        if statType == "Damage" then
+            -- 현재 player.Damage (unifiedMultipliers가 이미 수정한 값) 에 추가 적용
+            local cur = player.Damage
+            player.Damage = math.max(0.1, cur * totalMult + totalAdd)
+            -- Poison 데미지도 동일 비율로 스케일
+            if StatsAPI.stats.damage.supportsTearPoisonAPI(player) then
+                local curPoison = player:GetTearPoisonDamage()
+                player:SetTearPoisonDamage(math.max(0, curPoison * totalMult))
+            end
+            StatsAPI.printDebug(string.format(
+                "[playerMult] Damage cache: %.4f * %.4fx + %.4f = %.4f",
+                cur, totalMult, totalAdd, player.Damage
+            ))
+        elseif statType == "Tears" then
+            StatsAPI.stats.tears.applyMultiplier(player, totalMult, nil, false)
+            if totalAdd ~= 0 then
+                StatsAPI.stats.tears.applyAddition(player, totalAdd, nil)
+            end
+        elseif statType == "Range" then
+            StatsAPI.stats.range.applyMultiplier(player, totalMult, 0.1, false)
+        elseif statType == "Luck" then
+            player.Luck = player.Luck * totalMult + totalAdd
+        elseif statType == "Speed" then
+            StatsAPI.stats.speed.applyMultiplier(player, totalMult, 0.1, false)
+        elseif statType == "ShotSpeed" then
+            StatsAPI.stats.shotSpeed.applyMultiplier(player, totalMult, 0.1, false)
+        end
+
+        pm._isEvaluatingCache = false
+    end
+
+    StatsAPI.mod:AddCallback(ModCallbacks.MC_EVALUATE_CACHE, function(_, player, cacheFlag)
+        pmOnEvaluateCache(player, cacheFlag)
+    end)
+
+    -- MC_POST_GAME_STARTED: 새 게임 시작 시 슬롯 데이터 초기화
+    StatsAPI.mod:AddCallback(ModCallbacks.MC_POST_GAME_STARTED, function(_, isContinued)
+        local pm = StatsAPI.stats and StatsAPI.stats.playerMultipliers
+        if not pm then return end
+
+        if not isContinued then
+            -- 새 런: 모든 슬롯 데이터 초기화 (설정은 유지)
+            pm._slots = {}
+            StatsAPI.printDebug("[playerMult] Cleared all slot data for new game")
+        else
+            -- 이어하기: 모드 콜백(MC_EVALUATE_CACHE 등)이 데이터를 다시 등록함
+            StatsAPI.printDebug("[playerMult] Continued game: slot data restored by mod callbacks")
+        end
+    end)
+end
+
 StatsAPI.printDebug("Enhanced Stats library with unified multiplier system loaded successfully!")
