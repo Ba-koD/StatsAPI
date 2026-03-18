@@ -1186,8 +1186,20 @@ local function ToFixedFormatted(value, digits)
     return text
 end
 
+local MOVE_SPEED_MAX = 2.0
+
+local function ClampMoveSpeed(value)
+    if type(value) ~= "number" then
+        return value
+    end
+    if value > MOVE_SPEED_MAX then
+        return MOVE_SPEED_MAX
+    end
+    return value
+end
+
 local statReaderByType = {
-    Speed = function(p) return math.min(2, p.MoveSpeed) end,
+    Speed = function(p) return ClampMoveSpeed(p.MoveSpeed) end,
     Tears = function(p) return 30 / (p.MaxFireDelay + 1) end,
     Damage = function(p) return p.Damage end,
     Range = function(p) return p.TearRange / 40 end,
@@ -2264,9 +2276,7 @@ function StatsAPI.stats.speed.applyMultiplier(player, multiplier, minSpeed, show
     local baseSpeed = player.MoveSpeed
     local newSpeed = baseSpeed * multiplier
 
-    if minSpeed then
-        newSpeed = math.max(minSpeed, newSpeed)
-    end
+    newSpeed = ClampMoveSpeed(newSpeed)
 
     player.MoveSpeed = newSpeed
 
@@ -2281,9 +2291,7 @@ function StatsAPI.stats.speed.applyMultiplierScaled(player, multiplier, minSpeed
     local baseSpeed = player.MoveSpeed
     local newSpeed = baseSpeed * scaledMultiplier
 
-    if minSpeed then
-        newSpeed = math.max(minSpeed, newSpeed)
-    end
+    newSpeed = ClampMoveSpeed(newSpeed)
 
     player.MoveSpeed = newSpeed
 
@@ -2299,9 +2307,7 @@ function StatsAPI.stats.speed.applyAddition(player, addition, minSpeed)
     local baseSpeed = player.MoveSpeed
     local newSpeed = baseSpeed + addition
 
-    if minSpeed then
-        newSpeed = math.max(minSpeed, newSpeed)
-    end
+    newSpeed = ClampMoveSpeed(newSpeed)
 
     player.MoveSpeed = newSpeed
 
@@ -2316,9 +2322,7 @@ function StatsAPI.stats.speed.applyAdditionScaled(player, addition, minSpeed)
     local baseSpeed = player.MoveSpeed
     local newSpeed = baseSpeed + scaledAddition
 
-    if minSpeed then
-        newSpeed = math.max(minSpeed, newSpeed)
-    end
+    newSpeed = ClampMoveSpeed(newSpeed)
 
     player.MoveSpeed = newSpeed
 
@@ -2565,14 +2569,12 @@ StatsAPI.stats.unified = {}
 function StatsAPI.stats.unified.applyMultiplierToAll(player, multiplier, minStats, showDisplay)
     if not player then return end
 
-    minStats = minStats or StatsAPI.stats.BASE_STATS
-
-    StatsAPI.stats.damage.applyMultiplier(player, multiplier, minStats.damage * 0.4, showDisplay)
+    StatsAPI.stats.damage.applyMultiplier(player, multiplier, nil, showDisplay)
     StatsAPI.stats.tears.applyMultiplier(player, multiplier, nil, showDisplay)
-    StatsAPI.stats.speed.applyMultiplier(player, multiplier, minStats.speed * 0.4, showDisplay)
-    StatsAPI.stats.range.applyMultiplier(player, multiplier, minStats.range * 0.4, showDisplay)
-    StatsAPI.stats.luck.applyMultiplier(player, multiplier, minStats.luck * 0.4, showDisplay)
-    StatsAPI.stats.shotSpeed.applyMultiplier(player, multiplier, minStats.shotSpeed * 0.4, showDisplay)
+    StatsAPI.stats.speed.applyMultiplier(player, multiplier, nil, showDisplay)
+    StatsAPI.stats.range.applyMultiplier(player, multiplier, nil, showDisplay)
+    StatsAPI.stats.luck.applyMultiplier(player, multiplier, nil, showDisplay)
+    StatsAPI.stats.shotSpeed.applyMultiplier(player, multiplier, nil, showDisplay)
 
     return true
 end
@@ -2580,14 +2582,12 @@ end
 function StatsAPI.stats.unified.applyAdditionToAll(player, addition, minStats)
     if not player then return end
 
-    minStats = minStats or StatsAPI.stats.BASE_STATS
-
-    StatsAPI.stats.damage.applyAddition(player, addition, minStats.damage * 0.4)
+    StatsAPI.stats.damage.applyAddition(player, addition, nil)
     StatsAPI.stats.tears.applyAddition(player, addition, nil)
-    StatsAPI.stats.speed.applyAddition(player, addition, minStats.speed * 0.4)
-    StatsAPI.stats.range.applyAddition(player, addition, minStats.range * 0.4)
-    StatsAPI.stats.luck.applyAddition(player, addition, minStats.luck * 0.4)
-    StatsAPI.stats.shotSpeed.applyAddition(player, addition, minStats.shotSpeed * 0.4)
+    StatsAPI.stats.speed.applyAddition(player, addition, nil)
+    StatsAPI.stats.range.applyAddition(player, addition, nil)
+    StatsAPI.stats.luck.applyAddition(player, addition, nil)
+    StatsAPI.stats.shotSpeed.applyAddition(player, addition, nil)
 
     return true
 end
@@ -2697,15 +2697,15 @@ function StatsAPI.stats.unifiedMultipliers:ApplyStatMultiplier(player, statType,
     if statType == "Tears" then
         StatsAPI.stats.tears.applyMultiplier(player, totalMultiplier, nil, false)
     elseif statType == "Damage" then
-        StatsAPI.stats.damage.applyMultiplier(player, totalMultiplier, 0.1, false)
+        StatsAPI.stats.damage.applyMultiplier(player, totalMultiplier, nil, false)
     elseif statType == "Range" then
-        StatsAPI.stats.range.applyMultiplier(player, totalMultiplier, 0.1, false)
+        StatsAPI.stats.range.applyMultiplier(player, totalMultiplier, nil, false)
     elseif statType == "Luck" then
-        StatsAPI.stats.luck.applyMultiplier(player, totalMultiplier, 0.1, false)
+        StatsAPI.stats.luck.applyMultiplier(player, totalMultiplier, nil, false)
     elseif statType == "Speed" then
-        StatsAPI.stats.speed.applyMultiplier(player, totalMultiplier, 0.1, false)
+        StatsAPI.stats.speed.applyMultiplier(player, totalMultiplier, nil, false)
     elseif statType == "ShotSpeed" then
-        StatsAPI.stats.shotSpeed.applyMultiplier(player, totalMultiplier, 0.1, false)
+        StatsAPI.stats.shotSpeed.applyMultiplier(player, totalMultiplier, nil, false)
     end
 
     player:AddCacheFlags(CacheFlag.CACHE_ALL)
@@ -2739,8 +2739,9 @@ function StatsAPI.stats.unifiedMultipliers:ApplyStatMultiplier(player, statType,
             StatsAPI.printDebug(string.format("Direct update: Luck %.2f -> %.2f", originalValues.Luck, newLuck))
         elseif statType == "Speed" then
             local newSpeed = originalValues.Speed * totalMultiplier
-            player.MoveSpeed = newSpeed
-            StatsAPI.printDebug(string.format("Direct update: Speed %.2f -> %.2f", originalValues.Speed, newSpeed))
+            local appliedSpeed = ClampMoveSpeed(newSpeed)
+            player.MoveSpeed = appliedSpeed
+            StatsAPI.printDebug(string.format("Direct update: Speed %.2f -> %.2f (raw %.2f)", originalValues.Speed, appliedSpeed, newSpeed))
         elseif statType == "ShotSpeed" then
             local newShotSpeed = originalValues.ShotSpeed * totalMultiplier
             player.ShotSpeed = newShotSpeed
@@ -2800,16 +2801,16 @@ do
             StatsAPI.printDebug(string.format("[Unified] Damage calc: (%.2f base + %.2f add) x %.2fx mult = %.2f final",
                 baseDamage, add, total, finalDamage))
 
-            player.Damage = math.max(0.1, finalDamage)
+            player.Damage = finalDamage
             StatsAPI.stats.damage.applyPoisonDamageCombined(player, total, add)
         elseif statType == "Range" then
-            StatsAPI.stats.range.applyMultiplier(player, total, 0.1, false)
+            StatsAPI.stats.range.applyMultiplier(player, total, nil, false)
         elseif statType == "Luck" then
-            StatsAPI.stats.luck.applyMultiplier(player, total, 0.1, false)
+            StatsAPI.stats.luck.applyMultiplier(player, total, nil, false)
         elseif statType == "Speed" then
-            StatsAPI.stats.speed.applyMultiplier(player, total, 0.1, false)
+            StatsAPI.stats.speed.applyMultiplier(player, total, nil, false)
         elseif statType == "ShotSpeed" then
-            StatsAPI.stats.shotSpeed.applyMultiplier(player, total, 0.1, false)
+            StatsAPI.stats.shotSpeed.applyMultiplier(player, total, nil, false)
         end
         self._isEvaluatingCache = false
     end
@@ -3357,7 +3358,7 @@ do
         if statType == "Damage" then
             -- 현재 player.Damage (unifiedMultipliers가 이미 수정한 값) 에 추가 적용
             local cur = player.Damage
-            player.Damage = math.max(0.1, cur * totalMult + totalAdd)
+            player.Damage = cur * totalMult + totalAdd
             -- Poison 데미지도 동일 비율로 스케일
             if StatsAPI.stats.damage.supportsTearPoisonAPI(player) then
                 local curPoison = player:GetTearPoisonDamage()
@@ -3373,13 +3374,13 @@ do
                 StatsAPI.stats.tears.applyAddition(player, totalAdd, nil)
             end
         elseif statType == "Range" then
-            StatsAPI.stats.range.applyMultiplier(player, totalMult, 0.1, false)
+            StatsAPI.stats.range.applyMultiplier(player, totalMult, nil, false)
         elseif statType == "Luck" then
             player.Luck = player.Luck * totalMult + totalAdd
         elseif statType == "Speed" then
-            StatsAPI.stats.speed.applyMultiplier(player, totalMult, 0.1, false)
+            StatsAPI.stats.speed.applyMultiplier(player, totalMult, nil, false)
         elseif statType == "ShotSpeed" then
-            StatsAPI.stats.shotSpeed.applyMultiplier(player, totalMult, 0.1, false)
+            StatsAPI.stats.shotSpeed.applyMultiplier(player, totalMult, nil, false)
         end
 
         pm._isEvaluatingCache = false
