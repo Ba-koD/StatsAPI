@@ -135,6 +135,15 @@ um:SetItemMultiplierDisabled(player, ITEM_KEY, "Damage", false)
 - `"Range"`
 - `"Luck"`
 - `"ShotSpeed"`
+- `"FixedTears"` (aliases: `"FireDelay"`, `"TearDelay"`, `"FixedFireDelay"`)
+
+Speed cap APIs:
+
+- Default maximum speed is `2.0`.
+- `StatsAPI.stats.setSpeedCap(maxSpeed)` changes the cap used by all Speed applications.
+- `StatsAPI.stats.getSpeedCap()` returns the current cap.
+- `StatsAPI.stats.resetSpeedCap()` restores the default `2.0` cap.
+- `StatsAPI.stats.speed.setCap/getCap/resetCap` are aliases for the same cap.
 
 #### 2-5. Damage/Poison Synchronization
 
@@ -152,10 +161,14 @@ um:SetItemMultiplierDisabled(player, ITEM_KEY, "Damage", false)
 
 **Key difference:** The slot key remains constant even when the underlying `EntityPlayer` object changes (e.g. Tainted Lazarus flip), so slot data persists across character transformations.
 
+**Persistence note:** `unifiedMultipliers` is saved/restored through StatsAPI save data. `playerMultipliers` is runtime slot state, so re-register it on continue if it must survive a game restart.
+
 **Co-op use case:** Track effects per human player slot (slot 0 = Player 1, slot 1 = Player 2) independently of which character each player is using.
 
 **Application order:** `unifiedMultipliers` is applied first, then `playerMultipliers` is stacked on top (multiplicative).  
-Final formula: `(base + add_u) * mult_u * mult_p + add_p`
+For `Damage`, `Speed`, `Range`, `Luck`, and `ShotSpeed`: `(base + add_u) * mult_u * mult_p + add_p`  
+For `Tears`: base shots-per-second is multiplied first, then SPS additions are applied.  
+For `FixedTears`: values are applied directly to `MaxFireDelay` after regular `Tears`; negative additions increase fire rate.
 
 ##### Register APIs
 
@@ -221,9 +234,9 @@ mod:AddCallback(ModCallbacks.MC_POST_PEFFECT_UPDATE, function(_, player)
     if not StatsAPI then return end
     local pm = StatsAPI.stats.playerMultipliers
 
-    local ptr  = GetPtrHash(player)
+    local slot = player:GetPlayerNum()
     local now  = player:GetCollectibleNum(ITEM_ID)
-    local prev = lastCount[ptr] or 0
+    local prev = lastCount[slot] or 0
 
     if now > prev then
         for _ = 1, (now - prev) do
@@ -232,7 +245,7 @@ mod:AddCallback(ModCallbacks.MC_POST_PEFFECT_UPDATE, function(_, player)
     elseif now < prev then
         pm:RemoveAddition(player, ITEM_KEY, "Tears")
     end
-    lastCount[ptr] = now
+    lastCount[slot] = now
 end)
 ```
 
@@ -243,7 +256,7 @@ end)
 
 1. `main.lua` loads `scripts/statsapi_core.lua`
 2. `statsapi_core.lua` creates global `StatsAPI`
-3. Loads `scripts/lib/stats.lua`, `scripts/lib/vanilla_multipliers.lua`, `scripts/lib/damage_utils.lua`
+3. Loads `scripts/lib/stats.lua`, `scripts/lib/stats/*.lua`, `scripts/lib/vanilla_multipliers.lua`, `scripts/lib/damage_utils.lua`
 4. Registers HUD render callback
 
 #### 3-2. Apply Flow After Registration
@@ -279,6 +292,10 @@ end)
   - `SetItem*`, `Remove*`, `Get*` APIs
   - Cache queue/apply (`MC_POST_UPDATE`, `MC_EVALUATE_CACHE`)
   - HUD rendering
+
+- `scripts/lib/stats/*.lua`
+  - Per-stat apply modules (`damage`, `tears`, `fixed_tears`, `speed`, `range`, `luck`, `shot_speed`)
+  - Shared stat helpers (`shared.lua`)
 
 - `scripts/lib/vanilla_multipliers.lua`
   - Vanilla character/item multiplier tables

@@ -137,6 +137,15 @@ um:SetItemMultiplierDisabled(player, ITEM_KEY, "Damage", false)
 - `"Range"`
 - `"Luck"`
 - `"ShotSpeed"`
+- `"FixedTears"` (aliases: `"FireDelay"`, `"TearDelay"`, `"FixedFireDelay"`)
+
+Speed 상한 API:
+
+- 기본 최대 speed는 `2.0`입니다.
+- `StatsAPI.stats.setSpeedCap(maxSpeed)`로 모든 Speed 적용에서 쓰는 상한을 바꿉니다.
+- `StatsAPI.stats.getSpeedCap()`은 현재 상한을 반환합니다.
+- `StatsAPI.stats.resetSpeedCap()`은 기본값 `2.0`으로 되돌립니다.
+- `StatsAPI.stats.speed.setCap/getCap/resetCap`도 같은 상한을 쓰는 별칭입니다.
 
 #### 2-5. 데미지/Poison 동기화
 
@@ -155,10 +164,14 @@ um:SetItemMultiplierDisabled(player, ITEM_KEY, "Damage", false)
 **차이점:** 같은 슬롯이면 캐릭터 변신 후에도 데이터가 유지됩니다.  
 예: Tainted Lazarus 플립 — 두 폼이 슬롯 0을 공유하므로 같은 배율 데이터를 봅니다.
 
+**저장 범위:** `unifiedMultipliers`는 StatsAPI 저장 데이터로 복원됩니다. `playerMultipliers`는 런타임 슬롯 상태라 게임 재부팅/이어하기 후에도 필요하면 외부 모드가 다시 등록해야 합니다.
+
 **코옵에서의 활용:** 플레이어 1(슬롯 0)과 플레이어 2(슬롯 1)의 효과를 분리 관리할 때 유용합니다.
 
 **적용 순서:** `unifiedMultipliers` 먼저 적용 → `playerMultipliers` 추가 적용 (곱셈 스택)  
-최종 공식: `(base + add_u) * mult_u * mult_p + add_p`
+`Damage`, `Speed`, `Range`, `Luck`, `ShotSpeed`: `(base + add_u) * mult_u * mult_p + add_p`  
+`Tears`: 기본 SPS에 배율을 먼저 곱한 뒤 SPS 덧셈을 적용합니다.  
+`FixedTears`: 일반 `Tears` 적용 뒤 `MaxFireDelay`에 직접 적용됩니다. 음수 덧셈은 연사 속도를 올립니다.
 
 ##### 등록 API
 
@@ -224,9 +237,9 @@ mod:AddCallback(ModCallbacks.MC_POST_PEFFECT_UPDATE, function(_, player)
     if not StatsAPI then return end
     local pm = StatsAPI.stats.playerMultipliers
 
-    local ptr = GetPtrHash(player)
+    local slot = player:GetPlayerNum()
     local now  = player:GetCollectibleNum(ITEM_ID)
-    local prev = lastCount[ptr] or 0
+    local prev = lastCount[slot] or 0
 
     if now > prev then
         for _ = 1, (now - prev) do
@@ -235,7 +248,7 @@ mod:AddCallback(ModCallbacks.MC_POST_PEFFECT_UPDATE, function(_, player)
     elseif now < prev then
         pm:RemoveAddition(player, ITEM_KEY, "Tears")
     end
-    lastCount[ptr] = now
+    lastCount[slot] = now
 end)
 ```
 
@@ -246,7 +259,7 @@ end)
 
 1. `main.lua`에서 `scripts/statsapi_core.lua` 로드
 2. `statsapi_core.lua`에서 `StatsAPI` 전역 생성
-3. `scripts/lib/stats.lua`, `scripts/lib/vanilla_multipliers.lua`, `scripts/lib/damage_utils.lua` 로드
+3. `scripts/lib/stats.lua`, `scripts/lib/stats/*.lua`, `scripts/lib/vanilla_multipliers.lua`, `scripts/lib/damage_utils.lua` 로드
 4. HUD 렌더 콜백 등록
 
 #### 3-2. 등록 후 적용
@@ -282,6 +295,10 @@ end)
   - `SetItem*`, `Remove*`, `Get*` API
   - 캐시 큐/적용(`MC_POST_UPDATE`, `MC_EVALUATE_CACHE`)
   - HUD 표시 렌더
+
+- `scripts/lib/stats/*.lua`
+  - 스탯별 적용 모듈(`damage`, `tears`, `fixed_tears`, `speed`, `range`, `luck`, `shot_speed`)
+  - 공용 스탯 유틸(`shared.lua`)
 
 - `scripts/lib/vanilla_multipliers.lua`
   - 바닐라 캐릭터/아이템 배율 표

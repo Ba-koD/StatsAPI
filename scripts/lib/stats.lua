@@ -4,6 +4,50 @@
 
 StatsAPI.stats = StatsAPI.stats or {}
 
+local function LoadStatsSubmodule(modulePath)
+    local loadedTable = package and package.loaded
+    local slashPath = string.gsub(modulePath, "%.", "/")
+    if type(loadedTable) == "table" then
+        loadedTable[modulePath] = nil
+        loadedTable[slashPath] = nil
+        loadedTable[modulePath .. ".lua"] = nil
+        loadedTable[slashPath .. ".lua"] = nil
+    end
+
+    local candidates = { modulePath, slashPath }
+    local ok, result
+
+    if type(include) == "function" then
+        for _, candidate in ipairs(candidates) do
+            ok, result = pcall(include, candidate)
+            if ok then return true, result end
+        end
+    end
+
+    for _, candidate in ipairs(candidates) do
+        ok, result = pcall(require, candidate)
+        if ok then return true, result end
+    end
+
+    if not ok and StatsAPI and type(StatsAPI.printError) == "function" then
+        StatsAPI.printError("Stats submodule load failed: " .. tostring(modulePath) .. ": " .. tostring(result))
+    end
+    return ok, result
+end
+
+LoadStatsSubmodule("scripts.lib.stats.shared")
+local StatsShared = StatsAPI.stats.shared or {}
+local NormalizeStatType = StatsShared.NormalizeStatType or function(statType) return statType end
+local ClampMoveSpeed = StatsShared.ClampMoveSpeed or function(value) return value end
+local _safeSPSFromFireDelay = StatsShared.SafeSPSFromFireDelay or function(maxFireDelay)
+    return 30 / math.max(0.001, ((type(maxFireDelay) == "number" and maxFireDelay or 0) + 1))
+end
+local _safeFireDelayFromSPS = StatsShared.SafeFireDelayFromSPS or function(sps)
+    local safeSPS = math.max(0.01, type(sps) == "number" and sps or 0.01)
+    return (30 / safeSPS) - 1, safeSPS
+end
+local _clampFireDelay = StatsShared.ClampFireDelay or function(maxFireDelay) return maxFireDelay end
+
 -- base stats
 StatsAPI.stats.BASE_STATS = {
     damage = 3.5,
@@ -53,6 +97,7 @@ end
 -- Helper: convert an addition to an equivalent multiplier for display purposes
 local function _toEquivalentMultiplierFromAddition(player, statType, addition)
     if not player or type(addition) ~= "number" then return 1.0 end
+    statType = NormalizeStatType(statType)
     if statType == "Damage" then
         local base = player.Damage
         if base == 0 then return 1.0 end
@@ -74,6 +119,8 @@ local function _toEquivalentMultiplierFromAddition(player, statType, addition)
         local base = player.ShotSpeed
         if base == 0 then return 1.0 end
         return (base + addition) / base
+    elseif statType == "FixedTears" then
+        return 1.0
     elseif statType == "Luck" then
         return 1.0
     end
@@ -120,6 +167,7 @@ function StatsAPI.stats.unifiedMultipliers:SetItemMultiplier(player, itemID, sta
         return
     end
 
+    statType = NormalizeStatType(statType)
     self:InitPlayer(player)
     local playerID = StatsAPI:GetPlayerInstanceKey(player)
     local currentFrame = Game():GetFrameCount()
@@ -189,6 +237,7 @@ function StatsAPI.stats.unifiedMultipliers:MultiplyItemMultiplier(player, itemID
         return nil
     end
 
+    statType = NormalizeStatType(statType)
     self:InitPlayer(player)
     local playerID = StatsAPI:GetPlayerInstanceKey(player)
     local existing = self[playerID].itemMultipliers[itemID]
@@ -208,6 +257,7 @@ function StatsAPI.stats.unifiedMultipliers:SetItemAddition(player, itemID, statT
         return
     end
 
+    statType = NormalizeStatType(statType)
     self:InitPlayer(player)
     local playerID = StatsAPI:GetPlayerInstanceKey(player)
 
@@ -249,6 +299,7 @@ function StatsAPI.stats.unifiedMultipliers:SetItemAdditiveMultiplier(player, ite
         return
     end
 
+    statType = NormalizeStatType(statType)
     self:InitPlayer(player)
     local playerID = StatsAPI:GetPlayerInstanceKey(player)
     local currentFrame = Game():GetFrameCount()
@@ -291,6 +342,7 @@ function StatsAPI.stats.unifiedMultipliers:SetItemMultiplierDisabled(player, ite
         return false
     end
 
+    statType = NormalizeStatType(statType)
     self:InitPlayer(player)
     local playerID = StatsAPI:GetPlayerInstanceKey(player)
     local target = (disabled == true)
@@ -406,6 +458,7 @@ end
 function StatsAPI.stats.unifiedMultipliers:RemoveItemMultiplier(player, itemID, statType)
     if not player or not itemID or not statType then return end
 
+    statType = NormalizeStatType(statType)
     local playerID = StatsAPI:GetPlayerInstanceKey(player)
     local removed = false
 
@@ -443,6 +496,7 @@ end
 function StatsAPI.stats.unifiedMultipliers:RemoveItemAddition(player, itemID, statType)
     if not player or not itemID or not statType then return end
 
+    statType = NormalizeStatType(statType)
     local playerID = StatsAPI:GetPlayerInstanceKey(player)
     local removed = false
 
@@ -472,6 +526,7 @@ end
 function StatsAPI.stats.unifiedMultipliers:RecalculateStatMultiplier(player, statType)
     if not player or not statType then return end
 
+    statType = NormalizeStatType(statType)
     local playerID = StatsAPI:GetPlayerInstanceKey(player)
     if not self[playerID] then return end
 
@@ -669,6 +724,7 @@ end
 function StatsAPI.stats.unifiedMultipliers:GetMultipliers(player, statType)
     if not player or not statType then return 1.0, 1.0 end
 
+    statType = NormalizeStatType(statType)
     local playerID = StatsAPI:GetPlayerInstanceKey(player)
     if not self[playerID] or not self[playerID].statMultipliers[statType] then
         return 1.0, 1.0
@@ -1189,18 +1245,6 @@ local function ToFixedFormatted(value, digits)
         return text .. string.rep("0", digits - fractionLength)
     end
     return text
-end
-
-local MOVE_SPEED_MAX = 2.0
-
-local function ClampMoveSpeed(value)
-    if type(value) ~= "number" then
-        return value
-    end
-    if value > MOVE_SPEED_MAX then
-        return MOVE_SPEED_MAX
-    end
-    return value
 end
 
 local statReaderByType = {
@@ -2011,586 +2055,13 @@ end
 -- Stat Apply Functions
 -------------------------------------------------------------------------------
 
--- Damage
-StatsAPI.stats.damage = {}
-
-function StatsAPI.stats.damage.applyMultiplier(player, multiplier, minDamage, showDisplay)
-    if not player then
-        StatsAPI.printError("Player not found in StatsAPI.stats.damage.applyMultiplier")
-        return
-    end
-
-    local baseDamage = player.Damage
-    local newDamage = baseDamage * multiplier
-
-    if minDamage then
-        newDamage = math.max(minDamage, newDamage)
-    end
-
-    player.Damage = newDamage
-
-    StatsAPI.stats.damage.applyPoisonDamageMultiplier(player, multiplier)
-
-    return newDamage
-end
-
-function StatsAPI.stats.damage.applyMultiplierScaled(player, multiplier, minDamage, showDisplay)
-    if not player then
-        StatsAPI.printError("Player not found in StatsAPI.stats.damage.applyMultiplierScaled")
-        return
-    end
-
-    local vanillaMultiplier = 1.0
-    if StatsAPI.VanillaMultipliers and StatsAPI.VanillaMultipliers.GetPlayerDamageMultiplier then
-        vanillaMultiplier = StatsAPI.VanillaMultipliers:GetPlayerDamageMultiplier(player)
-    end
-
-    local scaledMultiplier = multiplier * vanillaMultiplier
-    local baseDamage = player.Damage
-    local newDamage = baseDamage * scaledMultiplier
-
-    if minDamage then
-        newDamage = math.max(minDamage, newDamage)
-    end
-
-    player.Damage = newDamage
-
-    StatsAPI.stats.damage.applyPoisonDamageMultiplier(player, scaledMultiplier)
-
-    StatsAPI.printDebug(string.format("[Damage] MultiplierScaled: %.2fx * %.2fx (vanilla) = %.2fx -> Total: %.2f",
-        multiplier, vanillaMultiplier, scaledMultiplier, newDamage))
-
-    return newDamage, scaledMultiplier
-end
-
-function StatsAPI.stats.damage.applyAddition(player, addition, minDamage)
-    if not player then return end
-
-    local baseDamage = player.Damage
-    local newDamage = baseDamage + addition
-
-    if minDamage then
-        newDamage = math.max(minDamage, newDamage)
-    end
-
-    player.Damage = newDamage
-
-    StatsAPI.stats.damage.applyPoisonDamageAddition(player, addition)
-
-    return newDamage
-end
-
-function StatsAPI.stats.damage.applyAdditionScaled(player, addition, minDamage)
-    if not player then return end
-
-    local vanillaMultiplier = 1.0
-    if StatsAPI.VanillaMultipliers and StatsAPI.VanillaMultipliers.GetPlayerDamageMultiplier then
-        vanillaMultiplier = StatsAPI.VanillaMultipliers:GetPlayerDamageMultiplier(player)
-    end
-
-    local scaledAddition = addition * vanillaMultiplier
-    local baseDamage = player.Damage
-    local newDamage = baseDamage + scaledAddition
-
-    if minDamage then
-        newDamage = math.max(minDamage, newDamage)
-    end
-
-    player.Damage = newDamage
-
-    StatsAPI.stats.damage.applyPoisonDamageAddition(player, scaledAddition)
-
-    StatsAPI.printDebug(string.format("[Damage] AdditionScaled: %.2f * %.2fx (vanilla) = %.2f -> Total: %.2f",
-        addition, vanillaMultiplier, scaledAddition, newDamage))
-
-    return newDamage, scaledAddition
-end
-
-function StatsAPI.stats.damage.applyPoisonDamageMultiplier(player, multiplier)
-    if not player then return end
-
-    if not StatsAPI.stats.damage.supportsTearPoisonAPI(player) then
-        return
-    end
-
-    local pdata = player:GetData()
-
-    if not pdata.statutils_tpd_base then
-        pdata.statutils_tpd_base = player:GetTearPoisonDamage()
-    end
-
-    if multiplier == 1.0 then
-        pdata.statutils_tpd_base = player:GetTearPoisonDamage()
-    end
-
-    local basePoisonDamage = pdata.statutils_tpd_base or 0
-    local newPoisonDamage = basePoisonDamage * multiplier
-
-    player:SetTearPoisonDamage(newPoisonDamage)
-    pdata.statutils_tpd_lastMult = multiplier
-
-    return newPoisonDamage
-end
-
-function StatsAPI.stats.damage.applyPoisonDamageAddition(player, addition)
-    if not player then return end
-
-    if not StatsAPI.stats.damage.supportsTearPoisonAPI(player) then
-        return
-    end
-
-    local pdata = player:GetData()
-
-    if not pdata.statutils_tpd_base then
-        pdata.statutils_tpd_base = player:GetTearPoisonDamage()
-    end
-
-    local basePoisonDamage = pdata.statutils_tpd_base or 0
-    local newPoisonDamage = basePoisonDamage + addition
-
-    player:SetTearPoisonDamage(newPoisonDamage)
-
-    return newPoisonDamage
-end
-
-function StatsAPI.stats.damage.applyPoisonDamageCombined(player, multiplier, addition)
-    if not player then return end
-    if not StatsAPI.stats.damage.supportsTearPoisonAPI(player) then
-        return
-    end
-
-    local pdata = player:GetData()
-
-    if not pdata.statutils_tpd_base then
-        pdata.statutils_tpd_base = player:GetTearPoisonDamage()
-    end
-
-    local basePoisonDamage = pdata.statutils_tpd_base or 0
-    local add = type(addition) == "number" and addition or 0
-    local mult = type(multiplier) == "number" and multiplier or 1.0
-    local newPoisonDamage = (basePoisonDamage + add) * mult
-
-    player:SetTearPoisonDamage(newPoisonDamage)
-    pdata.statutils_tpd_lastMult = mult
-    pdata.statutils_tpd_lastAdd = add
-
-    return newPoisonDamage
-end
-
-function StatsAPI.stats.damage.supportsTearPoisonAPI(player)
-    return player and type(player.GetTearPoisonDamage) == "function" and type(player.SetTearPoisonDamage) == "function"
-end
-
--- Tears
-StatsAPI.stats.tears = {}
-
-local MIN_TEAR_RATE_SPS = 0.01
-local MIN_FIRE_DELAY_DENOM = 0.001
-
-local function _safeSPSFromFireDelay(maxFireDelay)
-    local denom = (type(maxFireDelay) == "number" and maxFireDelay or 0) + 1
-    if denom < MIN_FIRE_DELAY_DENOM then
-        denom = MIN_FIRE_DELAY_DENOM
-    end
-    return 30 / denom
-end
-
-local function _safeFireDelayFromSPS(sps)
-    local safeSPS = type(sps) == "number" and sps or MIN_TEAR_RATE_SPS
-    if safeSPS < MIN_TEAR_RATE_SPS then
-        safeSPS = MIN_TEAR_RATE_SPS
-    end
-
-    local maxFireDelay = (30 / safeSPS) - 1
-    if (maxFireDelay + 1) < MIN_FIRE_DELAY_DENOM then
-        maxFireDelay = MIN_FIRE_DELAY_DENOM - 1
-    end
-
-    return maxFireDelay, safeSPS
-end
-
-function StatsAPI.stats.tears.calculateMaxFireDelay(baseFireDelay, multiplier, minFireDelay)
-    if not baseFireDelay or not multiplier then return baseFireDelay end
-
-    local baseSPS = _safeSPSFromFireDelay(baseFireDelay)
-    local targetSPS = baseSPS * multiplier
-    local newMaxFireDelay = _safeFireDelayFromSPS(targetSPS)
-
-    return newMaxFireDelay
-end
-
-function StatsAPI.stats.tears.applyMultiplier(player, multiplier, minFireDelay, showDisplay)
-    if not player then return end
-
-    local baseFireDelay = player.MaxFireDelay
-    local baseSPS = _safeSPSFromFireDelay(baseFireDelay)
-    local newFireDelay = StatsAPI.stats.tears.calculateMaxFireDelay(baseFireDelay, multiplier, nil)
-    local newSPS = _safeSPSFromFireDelay(newFireDelay)
-
-    StatsAPI.printDebug(string.format("[Tears] Multiplier apply: baseFD=%.4f baseSPS=%.4f mult=%.4f -> newFD=%.4f newSPS=%.4f",
-        baseFireDelay, baseSPS, multiplier, newFireDelay, newSPS))
-
-    player.MaxFireDelay = newFireDelay
-
-    return newFireDelay
-end
-
-function StatsAPI.stats.tears.applyMultiplierScaled(player, multiplier, minFireDelay, showDisplay)
-    if not player then return end
-
-    local vanillaMultiplier = 1.0
-    if StatsAPI.VanillaMultipliers and StatsAPI.VanillaMultipliers.GetPlayerFireRateMultiplier then
-        vanillaMultiplier = StatsAPI.VanillaMultipliers:GetPlayerFireRateMultiplier(player)
-    end
-
-    local scaledMultiplier = multiplier * vanillaMultiplier
-    local baseFireDelay = player.MaxFireDelay
-    local baseSPS = _safeSPSFromFireDelay(baseFireDelay)
-    local newFireDelay = StatsAPI.stats.tears.calculateMaxFireDelay(baseFireDelay, scaledMultiplier, nil)
-    local newSPS = _safeSPSFromFireDelay(newFireDelay)
-
-    StatsAPI.printDebug(string.format("[Tears] MultiplierScaled: baseFD=%.4f baseSPS=%.4f mult=%.4f * %.2fx = %.4f -> newFD=%.4f newSPS=%.4f",
-        baseFireDelay, baseSPS, multiplier, vanillaMultiplier, scaledMultiplier, newFireDelay, newSPS))
-
-    player.MaxFireDelay = newFireDelay
-
-    return newFireDelay, scaledMultiplier
-end
-
-function StatsAPI.stats.tears.applyAddition(player, addition, minFireDelay)
-    if not player then return end
-
-    local baseFireDelay = player.MaxFireDelay
-    local baseSPS = _safeSPSFromFireDelay(baseFireDelay)
-    local targetSPS = baseSPS + addition
-    local newMaxFireDelay = _safeFireDelayFromSPS(targetSPS)
-    local newSPS = _safeSPSFromFireDelay(newMaxFireDelay)
-
-    StatsAPI.printDebug(string.format("[Tears] Addition apply: baseFD=%.4f baseSPS=%.4f addSPS=%+.4f -> newFD=%.4f newSPS=%.4f",
-        baseFireDelay, baseSPS, addition, newMaxFireDelay, newSPS))
-
-    player.MaxFireDelay = newMaxFireDelay
-
-    return newMaxFireDelay
-end
-
-function StatsAPI.stats.tears.applyAdditionScaled(player, addition, minFireDelay)
-    if not player then return end
-
-    local vanillaMultiplier = 1.0
-    if StatsAPI.VanillaMultipliers and StatsAPI.VanillaMultipliers.GetPlayerFireRateMultiplier then
-        vanillaMultiplier = StatsAPI.VanillaMultipliers:GetPlayerFireRateMultiplier(player)
-    end
-
-    local scaledAddition = addition * vanillaMultiplier
-    local baseFireDelay = player.MaxFireDelay
-    local baseSPS = _safeSPSFromFireDelay(baseFireDelay)
-    local targetSPS = baseSPS + scaledAddition
-    local newMaxFireDelay = _safeFireDelayFromSPS(targetSPS)
-    local newSPS = _safeSPSFromFireDelay(newMaxFireDelay)
-
-    StatsAPI.printDebug(string.format("[Tears] AdditionScaled: baseFD=%.4f baseSPS=%.4f addSPS=%+.4f * %.2fx = %+.4f -> newFD=%.4f newSPS=%.4f",
-        baseFireDelay, baseSPS, addition, vanillaMultiplier, scaledAddition, newMaxFireDelay, newSPS))
-
-    player.MaxFireDelay = newMaxFireDelay
-
-    return newMaxFireDelay, scaledAddition
-end
-
--- Speed
-StatsAPI.stats.speed = {}
-
-function StatsAPI.stats.speed.applyMultiplier(player, multiplier, minSpeed, showDisplay)
-    if not player then return end
-
-    local baseSpeed = player.MoveSpeed
-    local newSpeed = baseSpeed * multiplier
-
-    newSpeed = ClampMoveSpeed(newSpeed)
-
-    player.MoveSpeed = newSpeed
-
-    return newSpeed
-end
-
-function StatsAPI.stats.speed.applyMultiplierScaled(player, multiplier, minSpeed, showDisplay)
-    if not player then return end
-
-    local vanillaMultiplier = 1.0
-    local scaledMultiplier = multiplier * vanillaMultiplier
-    local baseSpeed = player.MoveSpeed
-    local newSpeed = baseSpeed * scaledMultiplier
-
-    newSpeed = ClampMoveSpeed(newSpeed)
-
-    player.MoveSpeed = newSpeed
-
-    StatsAPI.printDebug(string.format("[Speed] MultiplierScaled: %.2fx * %.2fx = %.2fx -> Total: %.2f",
-        multiplier, vanillaMultiplier, scaledMultiplier, newSpeed))
-
-    return newSpeed, scaledMultiplier
-end
-
-function StatsAPI.stats.speed.applyAddition(player, addition, minSpeed)
-    if not player then return end
-
-    local baseSpeed = player.MoveSpeed
-    local newSpeed = baseSpeed + addition
-
-    newSpeed = ClampMoveSpeed(newSpeed)
-
-    player.MoveSpeed = newSpeed
-
-    return newSpeed
-end
-
-function StatsAPI.stats.speed.applyAdditionScaled(player, addition, minSpeed)
-    if not player then return end
-
-    local vanillaMultiplier = 1.0
-    local scaledAddition = addition * vanillaMultiplier
-    local baseSpeed = player.MoveSpeed
-    local newSpeed = baseSpeed + scaledAddition
-
-    newSpeed = ClampMoveSpeed(newSpeed)
-
-    player.MoveSpeed = newSpeed
-
-    StatsAPI.printDebug(string.format("[Speed] AdditionScaled: %.2f * %.2fx = %.2f -> Total: %.2f",
-        addition, vanillaMultiplier, scaledAddition, newSpeed))
-
-    return newSpeed, scaledAddition
-end
-
--- Range
-StatsAPI.stats.range = {}
-
-function StatsAPI.stats.range.applyMultiplier(player, multiplier, minRange, showDisplay)
-    if not player then return end
-
-    local baseRange = player.TearRange
-    local newRange = baseRange * multiplier
-
-    if minRange then
-        newRange = math.max(minRange, newRange)
-    end
-
-    player.TearRange = newRange
-
-    return newRange
-end
-
-function StatsAPI.stats.range.applyMultiplierScaled(player, multiplier, minRange, showDisplay)
-    if not player then return end
-
-    local vanillaMultiplier = 1.0
-    local scaledMultiplier = multiplier * vanillaMultiplier
-    local baseRange = player.TearRange
-    local newRange = baseRange * scaledMultiplier
-
-    if minRange then
-        newRange = math.max(minRange, newRange)
-    end
-
-    player.TearRange = newRange
-
-    StatsAPI.printDebug(string.format("[Range] MultiplierScaled: %.2fx * %.2fx = %.2fx -> Total: %.2f",
-        multiplier, vanillaMultiplier, scaledMultiplier, newRange))
-
-    return newRange, scaledMultiplier
-end
-
-function StatsAPI.stats.range.applyAddition(player, addition, minRange)
-    if not player then return end
-
-    local baseRange = player.TearRange
-    local newRange = baseRange + addition
-
-    if minRange then
-        newRange = math.max(minRange, newRange)
-    end
-
-    player.TearRange = newRange
-
-    return newRange
-end
-
-function StatsAPI.stats.range.applyAdditionScaled(player, addition, minRange)
-    if not player then return end
-
-    local vanillaMultiplier = 1.0
-    local scaledAddition = addition * vanillaMultiplier
-    local baseRange = player.TearRange
-    local newRange = baseRange + scaledAddition
-
-    if minRange then
-        newRange = math.max(minRange, newRange)
-    end
-
-    player.TearRange = newRange
-
-    StatsAPI.printDebug(string.format("[Range] AdditionScaled: %.2f * %.2fx = %.2f -> Total: %.2f",
-        addition, vanillaMultiplier, scaledAddition, newRange))
-
-    return newRange, scaledAddition
-end
-
--- Luck
-StatsAPI.stats.luck = {}
-
-function StatsAPI.stats.luck.applyMultiplier(player, multiplier, minLuck, showDisplay)
-    if not player then return end
-
-    local baseLuck = player.Luck
-    local newLuck = baseLuck
-
-    if baseLuck == 0 then
-        newLuck = 0
-    else
-        newLuck = baseLuck * multiplier
-        if minLuck then
-            newLuck = math.max(minLuck, newLuck)
-        end
-    end
-
-    player.Luck = newLuck
-
-    return newLuck
-end
-
-function StatsAPI.stats.luck.applyMultiplierScaled(player, multiplier, minLuck, showDisplay)
-    if not player then return end
-
-    local vanillaMultiplier = 1.0
-    local scaledMultiplier = multiplier * vanillaMultiplier
-    local baseLuck = player.Luck
-    local newLuck = baseLuck
-
-    if baseLuck == 0 then
-        newLuck = 0
-    else
-        newLuck = baseLuck * scaledMultiplier
-        if minLuck then
-            newLuck = math.max(minLuck, newLuck)
-        end
-    end
-
-    player.Luck = newLuck
-
-    StatsAPI.printDebug(string.format("[Luck] MultiplierScaled: %.2fx * %.2fx = %.2fx -> Total: %.2f",
-        multiplier, vanillaMultiplier, scaledMultiplier, newLuck))
-
-    return newLuck, scaledMultiplier
-end
-
-function StatsAPI.stats.luck.applyAddition(player, addition, minLuck)
-    if not player then return end
-
-    local baseLuck = player.Luck
-    local newLuck = baseLuck + addition
-
-    if minLuck then
-        newLuck = math.max(minLuck, newLuck)
-    end
-
-    player.Luck = newLuck
-
-    return newLuck
-end
-
-function StatsAPI.stats.luck.applyAdditionScaled(player, addition, minLuck)
-    if not player then return end
-
-    local vanillaMultiplier = 1.0
-    local scaledAddition = addition * vanillaMultiplier
-    local baseLuck = player.Luck
-    local newLuck = baseLuck + scaledAddition
-
-    if minLuck then
-        newLuck = math.max(minLuck, newLuck)
-    end
-
-    player.Luck = newLuck
-
-    StatsAPI.printDebug(string.format("[Luck] AdditionScaled: %.2f * %.2fx = %.2f -> Total: %.2f",
-        addition, vanillaMultiplier, scaledAddition, newLuck))
-
-    return newLuck, scaledAddition
-end
-
--- Shot Speed
-StatsAPI.stats.shotSpeed = {}
-
-function StatsAPI.stats.shotSpeed.applyMultiplier(player, multiplier, minShotSpeed, showDisplay)
-    if not player then return end
-
-    local baseShotSpeed = player.ShotSpeed
-    local newShotSpeed = baseShotSpeed * multiplier
-
-    if minShotSpeed then
-        newShotSpeed = math.max(minShotSpeed, newShotSpeed)
-    end
-
-    player.ShotSpeed = newShotSpeed
-
-    return newShotSpeed
-end
-
-function StatsAPI.stats.shotSpeed.applyMultiplierScaled(player, multiplier, minShotSpeed, showDisplay)
-    if not player then return end
-
-    local vanillaMultiplier = 1.0
-    local scaledMultiplier = multiplier * vanillaMultiplier
-    local baseShotSpeed = player.ShotSpeed
-    local newShotSpeed = baseShotSpeed * scaledMultiplier
-
-    if minShotSpeed then
-        newShotSpeed = math.max(minShotSpeed, newShotSpeed)
-    end
-
-    player.ShotSpeed = newShotSpeed
-
-    StatsAPI.printDebug(string.format("[ShotSpeed] MultiplierScaled: %.2fx * %.2fx = %.2fx -> Total: %.2f",
-        multiplier, vanillaMultiplier, scaledMultiplier, newShotSpeed))
-
-    return newShotSpeed, scaledMultiplier
-end
-
-function StatsAPI.stats.shotSpeed.applyAddition(player, addition, minShotSpeed)
-    if not player then return end
-
-    local baseShotSpeed = player.ShotSpeed
-    local newShotSpeed = baseShotSpeed + addition
-
-    if minShotSpeed then
-        newShotSpeed = math.max(minShotSpeed, newShotSpeed)
-    end
-
-    player.ShotSpeed = newShotSpeed
-
-    return newShotSpeed
-end
-
-function StatsAPI.stats.shotSpeed.applyAdditionScaled(player, addition, minShotSpeed)
-    if not player then return end
-
-    local vanillaMultiplier = 1.0
-    local scaledAddition = addition * vanillaMultiplier
-    local baseShotSpeed = player.ShotSpeed
-    local newShotSpeed = baseShotSpeed + scaledAddition
-
-    if minShotSpeed then
-        newShotSpeed = math.max(minShotSpeed, newShotSpeed)
-    end
-
-    player.ShotSpeed = newShotSpeed
-
-    StatsAPI.printDebug(string.format("[ShotSpeed] AdditionScaled: %.2f * %.2fx = %.2f -> Total: %.2f",
-        addition, vanillaMultiplier, scaledAddition, newShotSpeed))
-
-    return newShotSpeed, scaledAddition
-end
-
+LoadStatsSubmodule("scripts.lib.stats.damage")
+LoadStatsSubmodule("scripts.lib.stats.tears")
+LoadStatsSubmodule("scripts.lib.stats.fixed_tears")
+LoadStatsSubmodule("scripts.lib.stats.speed")
+LoadStatsSubmodule("scripts.lib.stats.range")
+LoadStatsSubmodule("scripts.lib.stats.luck")
+LoadStatsSubmodule("scripts.lib.stats.shot_speed")
 -------------------------------------------------------------------------------
 -- Unified Stat Apply Functions
 -------------------------------------------------------------------------------
@@ -2636,11 +2107,19 @@ end
 
 local statModuleByType = {
     damage = StatsAPI.stats.damage,
+    Damage = StatsAPI.stats.damage,
     tears = StatsAPI.stats.tears,
+    Tears = StatsAPI.stats.tears,
+    fixedTears = StatsAPI.stats.fixedTears,
+    FixedTears = StatsAPI.stats.fixedTears,
     speed = StatsAPI.stats.speed,
+    Speed = StatsAPI.stats.speed,
     range = StatsAPI.stats.range,
+    Range = StatsAPI.stats.range,
     luck = StatsAPI.stats.luck,
-    shotSpeed = StatsAPI.stats.shotSpeed
+    Luck = StatsAPI.stats.luck,
+    shotSpeed = StatsAPI.stats.shotSpeed,
+    ShotSpeed = StatsAPI.stats.shotSpeed
 }
 
 local methodByOperation = {
@@ -2653,6 +2132,7 @@ local function GetStatApplier(statType, operationType)
         return nil
     end
 
+    statType = NormalizeStatType(statType)
     local module = statModuleByType[statType]
     local methodName = methodByOperation[operationType]
     if type(module) ~= "table" or type(methodName) ~= "string" then
@@ -2705,6 +2185,7 @@ end
 local function BuildPlayerStatSnapshot(player)
     return {
         Tears = player.MaxFireDelay,
+        FixedTears = player.MaxFireDelay,
         Damage = player.Damage,
         Range = player.TearRange,
         Luck = player.Luck,
@@ -2717,6 +2198,7 @@ end
 function StatsAPI.stats.unifiedMultipliers:ApplyStatMultiplier(player, statType, totalMultiplier)
     if not player or not statType or not totalMultiplier then return end
 
+    statType = NormalizeStatType(statType)
     StatsAPI.printDebug(string.format("Applying %s multiplier %.2fx to player", statType, totalMultiplier))
 
     local originalValues = BuildPlayerStatSnapshot(player)
@@ -2726,6 +2208,8 @@ function StatsAPI.stats.unifiedMultipliers:ApplyStatMultiplier(player, statType,
 
     if statType == "Tears" then
         StatsAPI.stats.tears.applyMultiplier(player, totalMultiplier, nil, false)
+    elseif statType == "FixedTears" then
+        StatsAPI.stats.fixedTears.applyMultiplier(player, totalMultiplier, nil, false)
     elseif statType == "Damage" then
         StatsAPI.stats.damage.applyMultiplier(player, totalMultiplier, nil, false)
     elseif statType == "Range" then
@@ -2755,6 +2239,10 @@ function StatsAPI.stats.unifiedMultipliers:ApplyStatMultiplier(player, statType,
             local newFireDelay = _safeFireDelayFromSPS(targetSPS)
             player.MaxFireDelay = newFireDelay
             StatsAPI.printDebug(string.format("Direct update: MaxFireDelay %.2f -> %.2f", originalValues.Tears, newFireDelay))
+        elseif statType == "FixedTears" then
+            local newFireDelay = _clampFireDelay(originalValues.FixedTears * totalMultiplier)
+            player.MaxFireDelay = newFireDelay
+            StatsAPI.printDebug(string.format("Direct update: MaxFireDelay %.2f -> %.2f", originalValues.FixedTears, newFireDelay))
         elseif statType == "Damage" then
             local newDamage = originalValues.Damage * totalMultiplier
             player.Damage = newDamage
@@ -2789,81 +2277,87 @@ end
 -- Centralized Cache Handler + Callback Registration
 -------------------------------------------------------------------------------
 do
-    local CACHE_FLAG_TO_STAT = {
-        [CacheFlag.CACHE_DAMAGE] = "Damage",
-        [CacheFlag.CACHE_FIREDELAY] = "Tears",
-        [CacheFlag.CACHE_SPEED] = "Speed",
-        [CacheFlag.CACHE_RANGE] = "Range",
-        [CacheFlag.CACHE_LUCK] = "Luck",
-        [CacheFlag.CACHE_SHOTSPEED] = "ShotSpeed"
+    local CACHE_FLAG_TO_STATS = {
+        [CacheFlag.CACHE_DAMAGE] = {"Damage"},
+        [CacheFlag.CACHE_FIREDELAY] = {"Tears", "FixedTears"},
+        [CacheFlag.CACHE_SPEED] = {"Speed"},
+        [CacheFlag.CACHE_RANGE] = {"Range"},
+        [CacheFlag.CACHE_LUCK] = {"Luck"},
+        [CacheFlag.CACHE_SHOTSPEED] = {"ShotSpeed"}
     }
 
     function StatsAPI.stats.unifiedMultipliers:OnEvaluateCache(player, cacheFlag)
         if not player or not cacheFlag then return end
-        local statType = CACHE_FLAG_TO_STAT[cacheFlag]
-        if not statType then return end
+        local statTypes = CACHE_FLAG_TO_STATS[cacheFlag]
+        if not statTypes then return end
         self._isEvaluatingCache = true
 
         local ok, err = pcall(function()
             self:InitPlayer(player)
             local playerID = StatsAPI:GetPlayerInstanceKey(player)
-            local total = 1.0
-            local add = 0.0
 
-            local statData = self[playerID]
-                and self[playerID].statMultipliers
-                and self[playerID].statMultipliers[statType]
-                or nil
+            for _, statType in ipairs(statTypes) do
+                local total = 1.0
+                local add = 0.0
 
-            if statData and type(statData.totalApply) == "number" then
-                total = statData.totalApply
-            end
-            if statData and type(statData.totalAdditions) == "number" then
-                add = statData.totalAdditions
-            end
+                local statData = self[playerID]
+                    and self[playerID].statMultipliers
+                    and self[playerID].statMultipliers[statType]
+                    or nil
 
-            StatsAPI.printDebug(string.format(
-                "[Unified] Evaluating %s cache: add=%+.4f, mult=%.4fx",
-                statType,
-                add,
-                total
-            ))
-
-            if statType == "Tears" then
-                StatsAPI.stats.tears.applyMultiplier(player, total, nil, false)
-                if add ~= 0 then
-                    StatsAPI.stats.tears.applyAddition(player, add, nil)
-                    StatsAPI.printDebug(string.format("[Unified] Applied Tears SPS addition at cache: %+0.4f", add))
+                if statData and type(statData.totalApply) == "number" then
+                    total = statData.totalApply
                 end
-            elseif statType == "Damage" then
-                local baseDamage = player.Damage
-                local finalDamage = (baseDamage + add) * total
+                if statData and type(statData.totalAdditions) == "number" then
+                    add = statData.totalAdditions
+                end
 
                 StatsAPI.printDebug(string.format(
-                    "[Unified] Damage calc: (%.2f base + %.2f add) x %.2fx mult = %.2f final",
-                    baseDamage,
+                    "[Unified] Evaluating %s cache: add=%+.4f, mult=%.4fx",
+                    statType,
                     add,
-                    total,
-                    finalDamage
+                    total
                 ))
 
-                player.Damage = finalDamage
-                StatsAPI.stats.damage.applyPoisonDamageCombined(player, total, add)
-            elseif statType == "Range" then
-                player.TearRange = (player.TearRange + add) * total
-            elseif statType == "Luck" then
-                player.Luck = (player.Luck + add) * total
-            elseif statType == "Speed" then
-                local finalSpeed = (player.MoveSpeed + add) * total
-                player.MoveSpeed = ClampMoveSpeed(finalSpeed)
-            elseif statType == "ShotSpeed" then
-                player.ShotSpeed = (player.ShotSpeed + add) * total
+                if statType == "Tears" then
+                    StatsAPI.stats.tears.applyMultiplier(player, total, nil, false)
+                    if add ~= 0 then
+                        StatsAPI.stats.tears.applyAddition(player, add, nil)
+                        StatsAPI.printDebug(string.format("[Unified] Applied Tears SPS addition at cache: %+0.4f", add))
+                    end
+                elseif statType == "FixedTears" then
+                    StatsAPI.stats.fixedTears.applyMultiplier(player, total, nil, false)
+                    if add ~= 0 then
+                        StatsAPI.stats.fixedTears.applyAddition(player, add, nil)
+                    end
+                elseif statType == "Damage" then
+                    local baseDamage = player.Damage
+                    local finalDamage = (baseDamage + add) * total
+                    StatsAPI.printDebug(string.format(
+                        "[Unified] Damage calc: (%.2f base + %.2f add) x %.2fx mult = %.2f final",
+                        baseDamage,
+                        add,
+                        total,
+                        finalDamage
+                    ))
+                    player.Damage = finalDamage
+                    StatsAPI.stats.damage.applyPoisonDamageCombined(player, total, add)
+                elseif statType == "Range" then
+                    player.TearRange = (player.TearRange + add) * total
+                elseif statType == "Luck" then
+                    player.Luck = (player.Luck + add) * total
+                elseif statType == "Speed" then
+                    local finalSpeed = (player.MoveSpeed + add) * total
+                    player.MoveSpeed = ClampMoveSpeed(finalSpeed)
+                elseif statType == "ShotSpeed" then
+                    player.ShotSpeed = (player.ShotSpeed + add) * total
+                end
             end
         end)
 
         self._isEvaluatingCache = false
         if not ok then
-            StatsAPI.printError(string.format("[Unified] OnEvaluateCache failed for %s: %s", tostring(statType), tostring(err)))
+            StatsAPI.printError(string.format("[Unified] OnEvaluateCache failed for flag %s: %s", tostring(cacheFlag), tostring(err)))
         end
     end
 
@@ -2909,6 +2403,7 @@ do
     local STAT_TO_CACHE_FLAG = {
         Damage = CacheFlag.CACHE_DAMAGE,
         Tears = CacheFlag.CACHE_FIREDELAY,
+        FixedTears = CacheFlag.CACHE_FIREDELAY,
         Speed = CacheFlag.CACHE_SPEED,
         Range = CacheFlag.CACHE_RANGE,
         Luck = CacheFlag.CACHE_LUCK,
@@ -2918,6 +2413,7 @@ do
     -- Queue a cache update for a specific stat to be processed next frame
     function StatsAPI.stats.unifiedMultipliers:QueueCacheUpdate(player, statType)
         if not player or not statType then return end
+        statType = NormalizeStatType(statType)
         self:InitPlayer(player)
         local playerID = StatsAPI:GetPlayerInstanceKey(player)
         local flag = STAT_TO_CACHE_FLAG[statType] or CacheFlag.CACHE_ALL
@@ -3006,7 +2502,8 @@ end
 --
 -- 적용 순서:
 --   unifiedMultipliers 콜백이 먼저 실행된 뒤, playerMultipliers 콜백이 적용됨.
---   결과: (base + add_u) * mult_u ---> * mult_p + add_p (최종값)
+--   대부분 스탯: (base + add_u) * mult_u ---> * mult_p + add_p
+--   Tears/FixedTears는 각각 SPS/MaxFireDelay 규칙으로 별도 적용됨.
 -- =============================================================================
 
 StatsAPI.stats.playerMultipliers = StatsAPI.stats.playerMultipliers or {}
@@ -3020,16 +2517,21 @@ end
 local _PM_STAT_TO_FLAG = {
     Damage    = CacheFlag.CACHE_DAMAGE,
     Tears     = CacheFlag.CACHE_FIREDELAY,
+    FixedTears = CacheFlag.CACHE_FIREDELAY,
     Speed     = CacheFlag.CACHE_SPEED,
     Range     = CacheFlag.CACHE_RANGE,
     Luck      = CacheFlag.CACHE_LUCK,
     ShotSpeed = CacheFlag.CACHE_SHOTSPEED,
 }
 
-local _PM_FLAG_TO_STAT = {}
-for stat, flag in pairs(_PM_STAT_TO_FLAG) do
-    _PM_FLAG_TO_STAT[flag] = stat
-end
+local _PM_FLAG_TO_STATS = {
+    [CacheFlag.CACHE_DAMAGE] = {"Damage"},
+    [CacheFlag.CACHE_FIREDELAY] = {"Tears", "FixedTears"},
+    [CacheFlag.CACHE_SPEED] = {"Speed"},
+    [CacheFlag.CACHE_RANGE] = {"Range"},
+    [CacheFlag.CACHE_LUCK] = {"Luck"},
+    [CacheFlag.CACHE_SHOTSPEED] = {"ShotSpeed"},
+}
 
 -- 슬롯 스토리지는 _slots 서브테이블로 분리 (메서드 키와 충돌 방지)
 StatsAPI.stats.playerMultipliers._slots = StatsAPI.stats.playerMultipliers._slots or {}
@@ -3070,6 +2572,7 @@ end
 
 function StatsAPI.stats.playerMultipliers:RecalculateStat(player, statType)
     if not player or not statType then return end
+    statType = NormalizeStatType(statType)
     local k, data = _pmEnsureSlot(self, player)
     if not k then return end
 
@@ -3124,6 +2627,7 @@ end
 
 function StatsAPI.stats.playerMultipliers:QueueCacheUpdate(player, statType)
     if not player or not statType then return end
+    statType = NormalizeStatType(statType)
     local k, data = _pmEnsureSlot(self, player)
     if not k then return end
     local flag = _PM_STAT_TO_FLAG[statType] or CacheFlag.CACHE_ALL
@@ -3141,6 +2645,7 @@ function StatsAPI.stats.playerMultipliers:SetMultiplier(player, sourceKey, statT
         StatsAPI.printError("playerMultipliers.SetMultiplier: Invalid parameters")
         return
     end
+    statType = NormalizeStatType(statType)
     local k, data = _pmEnsureSlot(self, player)
     if not k then return end
     if not data.multipliers[sourceKey] then data.multipliers[sourceKey] = {} end
@@ -3162,6 +2667,7 @@ function StatsAPI.stats.playerMultipliers:MultiplyMultiplier(player, sourceKey, 
         StatsAPI.printError("playerMultipliers.MultiplyMultiplier: Invalid parameters")
         return nil
     end
+    statType = NormalizeStatType(statType)
     local k, data = _pmEnsureSlot(self, player)
     if not k then return nil end
     if not data.multipliers[sourceKey] then data.multipliers[sourceKey] = {} end
@@ -3192,6 +2698,7 @@ function StatsAPI.stats.playerMultipliers:SetAddition(player, sourceKey, statTyp
         StatsAPI.printError("playerMultipliers.SetAddition: Invalid parameters")
         return
     end
+    statType = NormalizeStatType(statType)
     local k, data = _pmEnsureSlot(self, player)
     if not k then return end
     if not data.additions[sourceKey] then data.additions[sourceKey] = {} end
@@ -3216,6 +2723,7 @@ function StatsAPI.stats.playerMultipliers:SetAdditiveMultiplier(player, sourceKe
         StatsAPI.printError("playerMultipliers.SetAdditiveMultiplier: Invalid parameters")
         return
     end
+    statType = NormalizeStatType(statType)
     local k, data = _pmEnsureSlot(self, player)
     if not k then return end
     if not data.additiveMultipliers[sourceKey] then data.additiveMultipliers[sourceKey] = {} end
@@ -3242,6 +2750,7 @@ end
 -- 반환값: 변경 여부(boolean)
 function StatsAPI.stats.playerMultipliers:SetMultiplierDisabled(player, sourceKey, statType, disabled)
     if not player or not sourceKey or not statType then return false end
+    statType = NormalizeStatType(statType)
     local k, data = _pmGetSlot(self, player)
     if not k or not data then return false end
 
@@ -3280,6 +2789,7 @@ end
 -- multiplier + addition + additive multiplier 전부 제거.
 function StatsAPI.stats.playerMultipliers:RemoveMultiplier(player, sourceKey, statType)
     if not player or not sourceKey or not statType then return end
+    statType = NormalizeStatType(statType)
     local k, data = _pmGetSlot(self, player)
     if not k or not data then return end
 
@@ -3311,6 +2821,7 @@ end
 -- addition + additive multiplier만 제거 (base multiplier는 유지).
 function StatsAPI.stats.playerMultipliers:RemoveAddition(player, sourceKey, statType)
     if not player or not sourceKey or not statType then return end
+    statType = NormalizeStatType(statType)
     local k, data = _pmGetSlot(self, player)
     if not k or not data then return end
 
@@ -3345,6 +2856,7 @@ end
 -- totalMultiplier, totalAdditions 반환. 없으면 1.0, 0.0 반환.
 function StatsAPI.stats.playerMultipliers:GetMultipliers(player, statType)
     if not player or not statType then return 1.0, 0.0 end
+    statType = NormalizeStatType(statType)
     local _, data = _pmGetSlot(self, player)
     if not data then return 1.0, 0.0 end
     local t = data.statTotals[statType]
@@ -3420,55 +2932,61 @@ do
         local pm = StatsAPI.stats and StatsAPI.stats.playerMultipliers
         if not pm then return end
 
-        local statType = _PM_FLAG_TO_STAT[cacheFlag]
-        if not statType then return end
+        local statTypes = _PM_FLAG_TO_STATS[cacheFlag]
+        if not statTypes then return end
 
         local k, data = _pmGetSlot(pm, player)
         if not k or not data then return end
 
-        local t = data.statTotals[statType]
-        if not t then return end
-
-        local totalMult = t.totalMultiplier or 1.0
-        local totalAdd  = t.totalAdditions  or 0.0
-        if totalMult == 1.0 and totalAdd == 0.0 then return end
-
         pm._isEvaluatingCache = true
 
         local ok, err = pcall(function()
-            if statType == "Damage" then
-                -- 현재 player.Damage (unifiedMultipliers가 이미 수정한 값) 에 추가 적용
-                local cur = player.Damage
-                player.Damage = cur * totalMult + totalAdd
-                -- Poison 데미지도 동일 비율로 스케일
-                if StatsAPI.stats.damage.supportsTearPoisonAPI(player) then
-                    local curPoison = player:GetTearPoisonDamage()
-                    player:SetTearPoisonDamage(math.max(0, curPoison * totalMult))
+            for _, statType in ipairs(statTypes) do
+                local t = data.statTotals[statType]
+                if t then
+                    local totalMult = t.totalMultiplier or 1.0
+                    local totalAdd  = t.totalAdditions  or 0.0
+                    if not (totalMult == 1.0 and totalAdd == 0.0) then
+                        if statType == "Damage" then
+                            local cur = player.Damage
+                            player.Damage = cur * totalMult + totalAdd
+                            if StatsAPI.stats.damage.supportsTearPoisonAPI(player) then
+                                local curPoison = player:GetTearPoisonDamage()
+                                local finalPoison = math.max(0, curPoison * totalMult + totalAdd)
+                                player:SetTearPoisonDamage(finalPoison)
+                            end
+                            StatsAPI.printDebug(string.format(
+                                "[playerMult] Damage cache: %.4f * %.4fx + %.4f = %.4f",
+                                cur, totalMult, totalAdd, player.Damage
+                            ))
+                        elseif statType == "Tears" then
+                            StatsAPI.stats.tears.applyMultiplier(player, totalMult, nil, false)
+                            if totalAdd ~= 0 then
+                                StatsAPI.stats.tears.applyAddition(player, totalAdd, nil)
+                            end
+                        elseif statType == "FixedTears" then
+                            StatsAPI.stats.fixedTears.applyMultiplier(player, totalMult, nil, false)
+                            if totalAdd ~= 0 then
+                                StatsAPI.stats.fixedTears.applyAddition(player, totalAdd, nil)
+                            end
+                        elseif statType == "Range" then
+                            player.TearRange = player.TearRange * totalMult + totalAdd
+                        elseif statType == "Luck" then
+                            player.Luck = player.Luck * totalMult + totalAdd
+                        elseif statType == "Speed" then
+                            local finalSpeed = player.MoveSpeed * totalMult + totalAdd
+                            player.MoveSpeed = ClampMoveSpeed(finalSpeed)
+                        elseif statType == "ShotSpeed" then
+                            player.ShotSpeed = player.ShotSpeed * totalMult + totalAdd
+                        end
+                    end
                 end
-                StatsAPI.printDebug(string.format(
-                    "[playerMult] Damage cache: %.4f * %.4fx + %.4f = %.4f",
-                    cur, totalMult, totalAdd, player.Damage
-                ))
-            elseif statType == "Tears" then
-                StatsAPI.stats.tears.applyMultiplier(player, totalMult, nil, false)
-                if totalAdd ~= 0 then
-                    StatsAPI.stats.tears.applyAddition(player, totalAdd, nil)
-                end
-            elseif statType == "Range" then
-                player.TearRange = player.TearRange * totalMult + totalAdd
-            elseif statType == "Luck" then
-                player.Luck = player.Luck * totalMult + totalAdd
-            elseif statType == "Speed" then
-                local finalSpeed = player.MoveSpeed * totalMult + totalAdd
-                player.MoveSpeed = ClampMoveSpeed(finalSpeed)
-            elseif statType == "ShotSpeed" then
-                player.ShotSpeed = player.ShotSpeed * totalMult + totalAdd
             end
         end)
 
         pm._isEvaluatingCache = false
         if not ok then
-            StatsAPI.printError(string.format("[playerMult] OnEvaluateCache failed for %s: %s", tostring(statType), tostring(err)))
+            StatsAPI.printError(string.format("[playerMult] OnEvaluateCache failed for flag %s: %s", tostring(cacheFlag), tostring(err)))
         end
     end
 
